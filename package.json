@@ -1,0 +1,31 @@
+{
+  "name": "omnilp-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.24.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "db:migrate": "pnpm --filter @omnilp/server db:migrate",
+    "dev": "concurrently -n web,server -c cyan,green \"pnpm --filter @omnilp/web dev\" \"pnpm --filter @omnilp/server dev\"",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "test": "pnpm -r test && node --test check/*.test.mjs",
+    "test:e2e": "playwright test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.19.1",
+    "concurrently": "9.2.1",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.0.6",
+    "globals": "16.4.0",
+    "prettier": "3.7.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.48.1",
+    "vitest": "4.0.15"
+  }
+}
