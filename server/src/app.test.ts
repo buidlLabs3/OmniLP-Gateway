@@ -58,6 +58,7 @@ const config: Config = {
   READ_ONLY: true,
   DEMO_MODE: true,
   TELEGRAM_BOT_TOKEN: undefined,
+  TELEGRAM_APP_URL: undefined,
   TELEGRAM_MAX_AGE_SECONDS: 900,
   SESSION_SECRET: "test-session-secret-that-is-long-enough",
   TON_DEPOSIT_GAS_UNITS: "300000000",

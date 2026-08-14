@@ -13,6 +13,7 @@
     "lint": "eslint . --max-warnings=0",
     "test": "pnpm -r test && node --test check/*.test.mjs",
     "test:e2e": "playwright test",
+    "telegram:setup": "pnpm --filter @omnilp/server telegram:setup",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {

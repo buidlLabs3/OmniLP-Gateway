@@ -10,7 +10,31 @@ test.beforeEach(async ({ page }) => {
     async (route) => {
       await route.fulfill({
         contentType: "application/javascript",
-        body: "window.Telegram={WebApp:{initData:'',colorScheme:'light'}};",
+        body: `(() => {
+          let mainClick = () => {};
+          let backClick = () => {};
+          const MainButton = {
+            setText() {}, show() {}, hide() {}, enable() {}, disable() {},
+            showProgress() {}, hideProgress() {},
+            onClick(callback) { mainClick = callback; },
+            offClick(callback) { if (mainClick === callback) mainClick = () => {}; }
+          };
+          const BackButton = {
+            show() {}, hide() {},
+            onClick(callback) { backClick = callback; },
+            offClick(callback) { if (backClick === callback) backClick = () => {}; }
+          };
+          window.__telegramTest = { main: () => mainClick(), back: () => backClick() };
+          window.ethereum = { request: async ({ method }) =>
+            method === 'eth_requestAccounts'
+              ? ['0x2222222222222222222222222222222222222222']
+              : null
+          };
+          window.Telegram = { WebApp: {
+            initData: 'signed-test-launch', colorScheme: 'light',
+            ready() {}, expand() {}, disableVerticalSwipes() {}, MainButton, BackButton
+          }};
+        })();`,
       });
     },
   );
@@ -105,7 +129,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("runs the Telegram preview flow without layout overflow", async ({
+test("runs inside a Telegram launch without layout overflow", async ({
   page,
 }, testInfo) => {
   await page.goto("/");
@@ -116,13 +140,20 @@ test("runs the Telegram preview flow without layout overflow", async ({
     page.getByRole("button", { name: /USDT \/ STON/ }),
   ).toBeVisible();
   await expect(page.getByText("$42,250")).toBeVisible();
-
-  await page.getByRole("button", { name: "Open preview" }).click();
   await expect(
-    page.locator("header").getByText("Demo", { exact: true }),
+    page.locator("header").getByText("Test", { exact: true }),
   ).toBeVisible();
   await expect(page.getByText("0x1111...1111")).toBeVisible();
-  await page.getByRole("button", { name: "Create review" }).click();
+  await page.getByRole("button", { name: "Change" }).click();
+  await expect(page.getByText("0x2222...2222")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create review" })).toHaveCount(
+    0,
+  );
+  await page.evaluate(() =>
+    (
+      window as Window & { __telegramTest: { main(): void } }
+    ).__telegramTest.main(),
+  );
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await expect(page.getByText("Review created")).toBeVisible();
   await expect(page.getByText("draft", { exact: true })).toBeVisible();
@@ -135,4 +166,32 @@ test("runs the Telegram preview flow without layout overflow", async ({
     path: `/tmp/omnilp-${testInfo.project.name}.png`,
     fullPage: true,
   });
+  await page.evaluate(() =>
+    (
+      window as Window & { __telegramTest: { back(): void } }
+    ).__telegramTest.back(),
+  );
+  await expect(
+    page.getByRole("heading", { name: "STON.fi pool" }),
+  ).toBeVisible();
+});
+
+test("does not expose the product outside Telegram", async ({ page }) => {
+  await page.unroute("https://telegram.org/js/telegram-web-app.js?63");
+  await page.route(
+    "https://telegram.org/js/telegram-web-app.js?63",
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/javascript",
+        body: "window.Telegram={WebApp:{initData:'',colorScheme:'light'}};",
+      });
+    },
+  );
+  await page.goto("/");
+  await expect(
+    page.getByRole("strong").filter({ hasText: "Open in Telegram" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "STON.fi pool" })).toHaveCount(
+    0,
+  );
 });

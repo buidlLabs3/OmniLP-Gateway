@@ -14,7 +14,6 @@ import {
   History,
   RefreshCw,
   ShieldCheck,
-  Wallet,
 } from "lucide-react";
 import {
   useCallback,
@@ -35,10 +34,12 @@ import {
   type Pool,
   type TelegramSession,
 } from "../lib/api";
-import { startTelegram, tap } from "../lib/telegram";
+import { connectBaseWallet } from "../lib/base";
+import { getTelegram, startTelegram, tap } from "../lib/telegram";
 
 const demoBase = "0x1111111111111111111111111111111111111111";
 const demoTon = `0:${"9".repeat(64)}`;
+const botUrl = process.env.NEXT_PUBLIC_TELEGRAM_BOT_URL;
 const emptyImpact: Impact = {
   checkedAt: new Date(0).toISOString(),
   routedUsdcUnits: "0",
@@ -88,6 +89,8 @@ export default function Home() {
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [launchError, setLaunchError] = useState("");
+  const [nativeButton, setNativeButton] = useState(false);
 
   const tonWallet = connectedTon || (demoWallets ? demoTon : "");
   const activePool = useMemo(
@@ -115,59 +118,36 @@ export default function Home() {
 
   useEffect(() => {
     const telegram = startTelegram();
-    setLaunch(telegram?.initData ? "telegram" : "browser");
-    if (telegram?.initData) {
-      void startTelegramSession(telegram.initData)
-        .then(setSession)
-        .catch((cause: unknown) =>
-          setError(
-            cause instanceof Error
-              ? cause.message
-              : "Telegram session could not be verified.",
-          ),
-        );
-    }
-    void load();
-    const recent = localStorage.getItem("omnilp.flow");
-    if (recent) setFlowId(recent);
-  }, [load]);
-
-  async function openPreview() {
-    setBusy(true);
-    setError("");
-    try {
-      const next = await startTelegramSession("", true);
-      setSession(next);
-      setDemoWallets(true);
-      setBaseWallet(demoBase);
-      tap("success");
-    } catch (cause) {
-      tap("error");
-      setError(cause instanceof Error ? cause.message : "Preview unavailable.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function connectBase() {
-    const provider = window.ethereum;
-    if (!provider) {
-      setError("No Base wallet was found in this browser.");
+    if (!telegram) {
+      setLaunch("browser");
       return;
     }
+    setLaunch("telegram");
+    setNativeButton(Boolean(telegram.MainButton));
+    const recent = localStorage.getItem("omnilp.flow");
+    if (recent) setFlowId(recent);
+    void startTelegramSession(telegram.initData)
+      .then(async (next) => {
+        setSession(next);
+        if (next.demo) {
+          setDemoWallets(true);
+          setBaseWallet(demoBase);
+        }
+        await load();
+      })
+      .catch((cause: unknown) =>
+        setLaunchError(
+          cause instanceof Error
+            ? cause.message
+            : "Telegram session could not be verified.",
+        ),
+      );
+  }, [load]);
+
+  async function connectBase() {
     setError("");
     try {
-      await provider.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: "0x2105" }],
-      });
-      const accounts = await provider.request({
-        method: "eth_requestAccounts",
-      });
-      if (!Array.isArray(accounts) || typeof accounts[0] !== "string") {
-        throw new Error("Wallet did not return an account.");
-      }
-      setBaseWallet(accounts[0]);
+      setBaseWallet(await connectBaseWallet());
       tap("success");
     } catch {
       tap("error");
@@ -231,6 +211,90 @@ export default function Home() {
     tap("success");
   }
 
+  useEffect(() => {
+    const telegram = getTelegram();
+    const mainButton = telegram?.MainButton;
+    const backButton = telegram?.BackButton;
+    const submit = () => {
+      const form = document.querySelector<HTMLFormElement>("#entry-form");
+      form?.requestSubmit();
+    };
+    const goBack = () => setTab("enter");
+
+    if (mainButton) {
+      mainButton.offClick(submit);
+      if (tab === "enter" && session) {
+        mainButton.setText(busy ? "Creating..." : "Create review");
+        mainButton.show();
+        mainButton.onClick(submit);
+        if (busy) mainButton.showProgress();
+        else mainButton.hideProgress();
+        if (!busy && activePool && baseWallet && tonWallet && amount) {
+          mainButton.enable();
+        } else {
+          mainButton.disable();
+        }
+      } else {
+        mainButton.hideProgress();
+        mainButton.hide();
+      }
+    }
+
+    if (backButton) {
+      backButton.offClick(goBack);
+      if (tab === "activity") {
+        backButton.show();
+        backButton.onClick(goBack);
+      } else {
+        backButton.hide();
+      }
+    }
+
+    return () => {
+      mainButton?.offClick(submit);
+      backButton?.offClick(goBack);
+    };
+  }, [activePool, amount, baseWallet, busy, session, tab, tonWallet]);
+
+  if (
+    launch === "loading" ||
+    (launch === "telegram" && !session && !launchError)
+  ) {
+    return (
+      <main className="launch-screen">
+        <span className="brand-mark" aria-hidden="true">
+          OL
+        </span>
+        <strong>Opening OmniLP</strong>
+        <span className="launch-loader" aria-label="Loading" />
+      </main>
+    );
+  }
+
+  if (launch === "browser" || launchError) {
+    return (
+      <main className="launch-screen">
+        <span className="brand-mark" aria-hidden="true">
+          OL
+        </span>
+        <strong>
+          {launchError ? "Telegram launch rejected" : "Open in Telegram"}
+        </strong>
+        <p>
+          {launchError
+            ? "Close this view and launch OmniLP again from the bot."
+            : "OmniLP runs inside its Telegram Mini App."}
+        </p>
+        {botUrl && (
+          <a className="primary launch-link" href={botUrl}>
+            Open Telegram
+            <ExternalLink size={17} />
+          </a>
+        )}
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       <header className="app-head">
@@ -240,15 +304,12 @@ export default function Home() {
           </span>
           <div>
             <strong>OmniLP</strong>
-            <span>
-              {session?.user.firstName ??
-                (launch === "loading" ? "Opening..." : "Telegram Gateway")}
-            </span>
+            <span>{session?.user.firstName}</span>
           </div>
         </div>
         <div className="head-actions">
           <span className={`mode ${session?.demo ? "demo" : ""}`}>
-            {session?.demo ? "Demo" : session ? "Verified" : "Read only"}
+            {session?.demo ? "Test" : "Verified"}
           </span>
           <button
             className="icon-button"
@@ -280,7 +341,11 @@ export default function Home() {
       </nav>
 
       {tab === "enter" ? (
-        <form className="entry" onSubmit={(event) => void submit(event)}>
+        <form
+          id="entry-form"
+          className="entry"
+          onSubmit={(event) => void submit(event)}
+        >
           <section className="amount-section">
             <label htmlFor="amount">You send from Base</label>
             <div className="amount-row">
@@ -379,27 +444,13 @@ export default function Home() {
                 {demoWallets && !connectedTon ? (
                   <span className="demo-connected">
                     <Check size={14} />
-                    Demo
+                    Test
                   </span>
                 ) : (
                   <TonConnectButton />
                 )}
               </div>
             </div>
-            {session?.demo && (
-              <button
-                className="demo-wallets"
-                type="button"
-                onClick={() => {
-                  setDemoWallets(true);
-                  setBaseWallet(demoBase);
-                  tap();
-                }}
-              >
-                <Wallet size={16} />
-                Restore demo wallets
-              </button>
-            )}
           </section>
 
           <section className="impact-strip" aria-label="Gateway impact">
@@ -424,18 +475,8 @@ export default function Home() {
             </p>
           )}
 
-          <div className="action-bar">
-            {!session ? (
-              <button
-                className="primary"
-                type="button"
-                disabled={busy}
-                onClick={() => void openPreview()}
-              >
-                {busy ? "Opening..." : "Open preview"}
-                <ArrowRight size={18} />
-              </button>
-            ) : (
+          <div className={`action-bar ${nativeButton ? "native" : ""}`}>
+            {!nativeButton && (
               <button
                 className="primary"
                 type="submit"
@@ -449,7 +490,7 @@ export default function Home() {
             )}
             <span>
               {session?.demo
-                ? "Preview only. No funds move."
+                ? "Test session. No funds move."
                 : "Execution stays locked until route verification passes."}
             </span>
           </div>
@@ -547,12 +588,4 @@ export default function Home() {
       )}
     </main>
   );
-}
-
-declare global {
-  interface Window {
-    ethereum?: {
-      request(input: { method: string; params?: unknown[] }): Promise<unknown>;
-    };
-  }
 }

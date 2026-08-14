@@ -8,6 +8,7 @@
     "db:migrate": "tsx src/migrate.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
+    "telegram:setup": "tsx src/telegram-setup.ts",
     "test": "vitest run src",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

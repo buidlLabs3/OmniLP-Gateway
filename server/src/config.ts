@@ -17,6 +17,15 @@ const optionalSecret = z.preprocess(
   z.string().min(1).optional(),
 );
 
+const optionalHttpsUrl = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z
+    .string()
+    .url()
+    .refine((url) => url.startsWith("https://"), "Must use https")
+    .optional(),
+);
+
 const configSchema = z
   .object({
     NODE_ENV: z
@@ -72,6 +81,7 @@ const configSchema = z
     READ_ONLY: booleanValue.default(true),
     DEMO_MODE: booleanValue.default(false),
     TELEGRAM_BOT_TOKEN: optionalSecret,
+    TELEGRAM_APP_URL: optionalHttpsUrl,
     TELEGRAM_MAX_AGE_SECONDS: z.coerce
       .number()
       .int()
@@ -104,6 +114,13 @@ const configSchema = z
         path: ["TELEGRAM_BOT_TOKEN"],
       });
     }
+    if (value.NODE_ENV === "production" && !value.TELEGRAM_APP_URL) {
+      context.addIssue({
+        code: "custom",
+        message: "TELEGRAM_APP_URL is required in production",
+        path: ["TELEGRAM_APP_URL"],
+      });
+    }
   });
 
 export type Config = z.infer<typeof configSchema>;
@@ -130,8 +147,18 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env): Config {
     READ_ONLY: env.READ_ONLY,
     DEMO_MODE: env.DEMO_MODE,
     TELEGRAM_BOT_TOKEN: env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_APP_URL: env.TELEGRAM_APP_URL,
     TELEGRAM_MAX_AGE_SECONDS: env.TELEGRAM_MAX_AGE_SECONDS,
     SESSION_SECRET: env.SESSION_SECRET,
     TON_DEPOSIT_GAS_UNITS: env.TON_DEPOSIT_GAS_UNITS,
   });
+}
+
+export function loadLocalEnv(): void {
+  if (process.env.NODE_ENV === "production") return;
+  try {
+    process.loadEnvFile(new URL("../../.env", import.meta.url));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
 }

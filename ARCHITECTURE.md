@@ -129,7 +129,7 @@ Directory names stay literal: `web`, `server`, `shared`, `db`, and `tests`. Avoi
 
 ### 6.1 Web
 
-Next.js renders a mobile-first Telegram Mini App. It owns Telegram launch, Base wallet connection, TON Connect, and review-flow input; all value-moving wallet requests remain locked.
+Next.js renders a Telegram-only, mobile-first Mini App. It owns verified Telegram launch, Base Account connection with injected fallback, TON Connect, native Telegram main/back controls, and review-flow input; all value-moving wallet requests remain locked.
 
 Target responsibilities:
 
@@ -145,7 +145,7 @@ Target responsibilities:
 
 The web application must not infer settlement from a wallet success callback. It waits for server verification. Until both wallet integrations and transaction builders are complete, the UI cannot enable execution.
 
-Outside Telegram, the local build exposes an explicit demo session. It uses fixed non-funded wallet addresses and labels every draft as preview-only. Demo mode is rejected when `NODE_ENV=production`.
+Outside Telegram, the web entrypoint renders only a bot handoff and never loads pools or flow controls. Playwright injects an isolated Telegram WebApp context and fixed non-funded wallets for browser automation. `DEMO_MODE` controls the memory-backed server store; it is not a browser authentication bypass and is rejected when `NODE_ENV=production`.
 
 ### 6.2 Server
 
@@ -164,6 +164,8 @@ Implemented responsibilities:
 - validate signed Telegram launch data and bind flow creation to a short-lived launch session.
 
 Telegram identity is verified with the bot-token HMAC over raw `initData`, including a freshness bound. The server returns only a short-lived signed launch token and does not persist the Telegram profile. Wallet ownership still requires independent Base and TON proofs; Telegram identity never substitutes for a wallet signature.
+
+The `telegram:setup` command registers the deployed HTTPS app as the bot's chat menu button through `setChatMenuButton`. Main Mini App profile registration and preview media remain BotFather-controlled deployment steps.
 
 Omniston order construction, signed-order registration, trade tracking, destination settlement proof, transaction building, withdrawal planning, and quote-expiry scheduling remain release blockers.
 

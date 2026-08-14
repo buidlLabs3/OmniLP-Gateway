@@ -1,5 +1,5 @@
 import { buildApp } from "./app.js";
-import { getConfig } from "./config.js";
+import { getConfig, loadLocalEnv } from "./config.js";
 import { demoPools } from "./demo.js";
 import { Jobs } from "./jobs.js";
 import { StonService } from "./services/ston.js";
@@ -7,14 +7,7 @@ import { MemoryStore } from "./store/memory.js";
 import { PostgresStore } from "./store/postgres.js";
 import type { Store } from "./store/types.js";
 
-if (process.env.NODE_ENV !== "production") {
-  try {
-    process.loadEnvFile(new URL("../../.env", import.meta.url));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-}
-
+loadLocalEnv();
 const config = getConfig();
 const store: Store = config.DEMO_MODE
   ? new MemoryStore()

@@ -169,7 +169,7 @@ If the Base route is not production-ready, the first release falls back to a TON
 
 ## Local Development
 
-Node 22 and pnpm 10 are required. For the no-funds local demo, run:
+Node 22 and pnpm 10 are required. Start the local services with:
 
 ```bash
 cp .env.example .env
@@ -177,9 +177,9 @@ pnpm install
 pnpm dev
 ```
 
-Open `http://127.0.0.1:3000`, choose **Open preview**, then create a review and inspect it under **Activity**. `DEMO_MODE=true` uses an in-memory store and seeded pool, so restarting the server clears demo flows. Set `DEMO_MODE=false`, configure PostgreSQL, run `pnpm db:migrate`, and provide `TELEGRAM_BOT_TOKEN` for a persistent deployment.
+Opening `http://127.0.0.1:3000` directly shows only the Telegram handoff. The product UI requires signed Telegram launch data and is exercised locally by `pnpm test:e2e`, which provides an isolated Telegram WebApp harness. `DEMO_MODE=true` uses an in-memory store and seeded pool; restarting the server clears its flows. Set `DEMO_MODE=false`, configure PostgreSQL, and run `pnpm db:migrate` for persistence.
 
-A real Telegram launch needs an HTTPS `NEXT_PUBLIC_APP_URL`, the Mini App URL configured on the bot, and `NEXT_PUBLIC_TELEGRAM_BOT_URL` set to that bot's `https://t.me/...` URL. The server validates raw `Telegram.WebApp.initData`; client-side user data is never accepted as proof. Production configuration rejects demo mode and a missing bot token.
+A real launch needs an HTTPS `NEXT_PUBLIC_APP_URL`, the same URL in `TELEGRAM_APP_URL`, `NEXT_PUBLIC_TELEGRAM_BOT_URL` set to the bot's `https://t.me/...` URL, and `TELEGRAM_BOT_TOKEN`. After deployment, run `pnpm telegram:setup` to register **Open OmniLP** as the bot menu button. Configure the Main Mini App and its profile media separately through BotFather. The server validates raw `Telegram.WebApp.initData`; client-side user data is never accepted as proof. Production rejects browser/demo sessions, demo mode, a missing bot token, and a missing HTTPS app URL.
 
 `APPROVED_POOLS` is intentionally empty in the sample configuration. No pool becomes executable until its address is explicitly configured and its current token, fee, router, and V2 metadata pass validation. `READ_ONLY=true` disables every value-moving route.
 
@@ -206,9 +206,11 @@ The source layout and implementation plan are defined in [ARCHITECTURE.md](./ARC
 
 The read-only technical foundation is implemented:
 
-- mobile-first Telegram pool, wallet, impact, flow-creation, and resume surfaces;
+- Telegram-only, mobile-first pool, wallet, impact, flow-creation, and resume surfaces;
 - verified Telegram launch data, short-lived launch sessions, theme and safe-area support, haptics, and TON Connect;
-- an explicit memory-backed demo that creates and resumes drafts without PostgreSQL or funds;
+- Telegram native main/back controls and a bot menu-button setup command;
+- Base Account connection for Telegram WebViews with injected-wallet fallback;
+- a memory-backed test runtime that creates and resumes drafts without PostgreSQL or funds;
 - strict shared schemas, integer amount math, and explicit entry and exit states;
 - PostgreSQL persistence with append-only events, optimistic state versions, atomic transaction transitions, job claiming, and side-effect-safe idempotency reservations;
 - one-use Base and TON wallet ownership proofs with short-lived flow sessions;

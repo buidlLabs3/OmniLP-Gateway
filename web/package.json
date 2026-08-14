@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@base-org/account": "2.5.10",
     "@omnilp/shared": "workspace:*",
     "@tonconnect/ui-react": "3.0.0",
     "lucide-react": "0.552.0",
