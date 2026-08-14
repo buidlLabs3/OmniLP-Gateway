@@ -129,11 +129,12 @@ Directory names stay literal: `web`, `server`, `shared`, `db`, and `tests`. Avoi
 
 ### 6.1 Web
 
-Next.js renders the operator surface. It currently owns Base wallet connection and review-flow input; TON authorization and all value-moving wallet requests remain locked.
+Next.js renders a mobile-first Telegram Mini App. It owns Telegram launch, Base wallet connection, TON Connect, and review-flow input; all value-moving wallet requests remain locked.
 
 Target responsibilities:
 
 - connect Base and TON wallets;
+- apply Telegram theme, viewport, safe-area, and haptic primitives;
 - show approved pools;
 - request plans and quotes;
 - present exact addresses, amounts, fees, and expiry;
@@ -143,6 +144,8 @@ Target responsibilities:
 - show recovery and next actions.
 
 The web application must not infer settlement from a wallet success callback. It waits for server verification. Until both wallet integrations and transaction builders are complete, the UI cannot enable execution.
+
+Outside Telegram, the local build exposes an explicit demo session. It uses fixed non-funded wallet addresses and labels every draft as preview-only. Demo mode is rejected when `NODE_ENV=production`.
 
 ### 6.2 Server
 
@@ -158,6 +161,9 @@ Implemented responsibilities:
 - verify STON.fi LP positions;
 - calculate aggregate impact metrics;
 - reserve idempotency keys before writes and retry bounded verification reads.
+- validate signed Telegram launch data and bind flow creation to a short-lived launch session.
+
+Telegram identity is verified with the bot-token HMAC over raw `initData`, including a freshness bound. The server returns only a short-lived signed launch token and does not persist the Telegram profile. Wallet ownership still requires independent Base and TON proofs; Telegram identity never substitutes for a wallet signature.
 
 Omniston order construction, signed-order registration, trade tracking, destination settlement proof, transaction building, withdrawal planning, and quote-expiry scheduling remain release blockers.
 

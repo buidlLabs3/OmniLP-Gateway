@@ -1,6 +1,6 @@
 # OmniLP Gateway
 
-OmniLP Gateway is a non-custodial path from external stablecoins into selected STON.fi V2 liquidity pools.
+OmniLP Gateway is a non-custodial Telegram Mini App for moving external stablecoins into selected STON.fi V2 liquidity pools.
 
 The first release targets one route:
 
@@ -169,14 +169,17 @@ If the Base route is not production-ready, the first release falls back to a TON
 
 ## Local Development
 
-Node 22 and pnpm 10 are required. Configure a local PostgreSQL database, then run:
+Node 22 and pnpm 10 are required. For the no-funds local demo, run:
 
 ```bash
 cp .env.example .env
 pnpm install
-pnpm db:migrate
 pnpm dev
 ```
+
+Open `http://127.0.0.1:3000`, choose **Open preview**, then create a review and inspect it under **Activity**. `DEMO_MODE=true` uses an in-memory store and seeded pool, so restarting the server clears demo flows. Set `DEMO_MODE=false`, configure PostgreSQL, run `pnpm db:migrate`, and provide `TELEGRAM_BOT_TOKEN` for a persistent deployment.
+
+A real Telegram launch needs an HTTPS `NEXT_PUBLIC_APP_URL`, the Mini App URL configured on the bot, and `NEXT_PUBLIC_TELEGRAM_BOT_URL` set to that bot's `https://t.me/...` URL. The server validates raw `Telegram.WebApp.initData`; client-side user data is never accepted as proof. Production configuration rejects demo mode and a missing bot token.
 
 `APPROVED_POOLS` is intentionally empty in the sample configuration. No pool becomes executable until its address is explicitly configured and its current token, fee, router, and V2 metadata pass validation. `READ_ONLY=true` disables every value-moving route.
 
@@ -203,7 +206,9 @@ The source layout and implementation plan are defined in [ARCHITECTURE.md](./ARC
 
 The read-only technical foundation is implemented:
 
-- responsive pool, impact, flow-creation, and public-resume surfaces;
+- mobile-first Telegram pool, wallet, impact, flow-creation, and resume surfaces;
+- verified Telegram launch data, short-lived launch sessions, theme and safe-area support, haptics, and TON Connect;
+- an explicit memory-backed demo that creates and resumes drafts without PostgreSQL or funds;
 - strict shared schemas, integer amount math, and explicit entry and exit states;
 - PostgreSQL persistence with append-only events, optimistic state versions, atomic transaction transitions, job claiming, and side-effect-safe idempotency reservations;
 - one-use Base and TON wallet ownership proofs with short-lived flow sessions;

@@ -20,6 +20,7 @@ import { getImpact } from "./services/impact.js";
 import { idempotent } from "./services/idempotency.js";
 import { OmniService } from "./services/omni.js";
 import { StonService } from "./services/ston.js";
+import { TelegramService } from "./services/telegram.js";
 import type { Store } from "./store/types.js";
 
 const idSchema = z.object({ id: z.string().uuid() });
@@ -56,6 +57,7 @@ export interface AppOptions {
   omni?: OmniService;
   ston?: StonService;
   auth?: AuthService;
+  telegram?: TelegramService;
 }
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
@@ -63,15 +65,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const omni = options.omni ?? new OmniService(config);
   const ston = options.ston ?? new StonService(config);
   const auth = options.auth ?? new AuthService(config, store);
+  const telegram = options.telegram ?? new TelegramService(config);
   const app = Fastify({
     bodyLimit: 64 * 1024,
-    disableRequestLogging: false,
     genReqId: () => randomUUID(),
     logger: {
       level: config.NODE_ENV === "test" ? "silent" : "info",
       redact: [
         "req.headers.authorization",
         "req.headers.cookie",
+        "req.headers.x-telegram-session",
+        "req.body.initData",
         "req.body.signature",
         "req.body.typedData",
         "res.headers.set-cookie",
@@ -83,7 +87,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: config.WEB_ORIGIN,
     methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "Idempotency-Key", "Authorization"],
+    allowedHeaders: [
+      "Content-Type",
+      "Idempotency-Key",
+      "Authorization",
+      "X-Telegram-Session",
+    ],
     credentials: false,
   });
   await app.register(helmet, { contentSecurityPolicy: false });
@@ -128,6 +137,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     });
   });
 
+  app.post("/v1/telegram/session", (request) => telegram.start(request.body));
+
   app.get("/v1/pools", async () => ({ pools: await store.listPools() }));
 
   app.get("/v1/pools/:id", async (request) => {
@@ -138,6 +149,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   app.post("/v1/flows", async (request, reply) => {
+    telegram.verifySession(request.headers["x-telegram-session"]);
     const input = createFlowSchema.parse(request.body);
     const result = await idempotent(
       store,

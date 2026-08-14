@@ -12,6 +12,11 @@ const booleanValue = z
   .enum(["true", "false"])
   .transform((value) => value === "true");
 
+const optionalSecret = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 const configSchema = z
   .object({
     NODE_ENV: z
@@ -65,6 +70,14 @@ const configSchema = z
       .default(15_000),
     UPSTREAM_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
     READ_ONLY: booleanValue.default(true),
+    DEMO_MODE: booleanValue.default(false),
+    TELEGRAM_BOT_TOKEN: optionalSecret,
+    TELEGRAM_MAX_AGE_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(86_400)
+      .default(900),
     SESSION_SECRET: z.string().min(32),
     TON_DEPOSIT_GAS_UNITS: unitsSchema.refine((value) => BigInt(value) > 0n),
   })
@@ -75,6 +88,20 @@ const configSchema = z
         code: "custom",
         message: "MIN_SOURCE_UNITS cannot exceed MAX_SOURCE_UNITS",
         path: ["MIN_SOURCE_UNITS"],
+      });
+    }
+    if (value.NODE_ENV === "production" && value.DEMO_MODE) {
+      context.addIssue({
+        code: "custom",
+        message: "DEMO_MODE must be disabled in production",
+        path: ["DEMO_MODE"],
+      });
+    }
+    if (value.NODE_ENV === "production" && !value.TELEGRAM_BOT_TOKEN) {
+      context.addIssue({
+        code: "custom",
+        message: "TELEGRAM_BOT_TOKEN is required in production",
+        path: ["TELEGRAM_BOT_TOKEN"],
       });
     }
   });
@@ -101,6 +128,9 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env): Config {
     UPSTREAM_TIMEOUT_MS: env.UPSTREAM_TIMEOUT_MS,
     UPSTREAM_RETRIES: env.UPSTREAM_RETRIES,
     READ_ONLY: env.READ_ONLY,
+    DEMO_MODE: env.DEMO_MODE,
+    TELEGRAM_BOT_TOKEN: env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_MAX_AGE_SECONDS: env.TELEGRAM_MAX_AGE_SECONDS,
     SESSION_SECRET: env.SESSION_SECRET,
     TON_DEPOSIT_GAS_UNITS: env.TON_DEPOSIT_GAS_UNITS,
   });

@@ -24,6 +24,21 @@ const flowResponseSchema = z.object({
     .extend({ nextActions: z.array(z.string()).readonly() }),
 });
 const impactResponseSchema = z.object({ impact: impactSchema });
+const telegramSessionSchema = z.object({
+  user: z.object({
+    id: z.string(),
+    firstName: z.string(),
+    lastName: z.string().optional(),
+    username: z.string().optional(),
+    languageCode: z.string().optional(),
+    photoUrl: z.string().url().optional(),
+  }),
+  demo: z.boolean(),
+  token: z.string().min(1),
+  expiresAt: z.string().datetime(),
+});
+
+let telegramToken = "";
 
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(`${apiUrl}${path}`, {
@@ -43,6 +58,21 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
 export type Pool = z.infer<typeof poolSchema>;
 export type FlowView = z.infer<typeof flowResponseSchema>["flow"];
 export type Impact = z.infer<typeof impactSchema>;
+export type TelegramSession = z.infer<typeof telegramSessionSchema>;
+
+export async function startTelegramSession(
+  initData: string,
+  demo = false,
+): Promise<TelegramSession> {
+  const session = telegramSessionSchema.parse(
+    await request("/v1/telegram/session", {
+      method: "POST",
+      body: JSON.stringify({ initData, demo }),
+    }),
+  );
+  telegramToken = session.token;
+  return session;
+}
 
 export async function getPools(): Promise<Pool[]> {
   return poolListSchema.parse(await request("/v1/pools")).pools;
@@ -66,7 +96,10 @@ export async function createFlow(input: {
 }): Promise<FlowView> {
   const value = await request("/v1/flows", {
     method: "POST",
-    headers: { "Idempotency-Key": crypto.randomUUID() },
+    headers: {
+      "Idempotency-Key": crypto.randomUUID(),
+      "X-Telegram-Session": telegramToken,
+    },
     body: JSON.stringify({ type: "entry", ...input }),
   });
   return flowResponseSchema.parse(value).flow;

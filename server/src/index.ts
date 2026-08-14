@@ -1,11 +1,25 @@
 import { buildApp } from "./app.js";
 import { getConfig } from "./config.js";
+import { demoPools } from "./demo.js";
 import { Jobs } from "./jobs.js";
 import { StonService } from "./services/ston.js";
+import { MemoryStore } from "./store/memory.js";
 import { PostgresStore } from "./store/postgres.js";
+import type { Store } from "./store/types.js";
+
+if (process.env.NODE_ENV !== "production") {
+  try {
+    process.loadEnvFile(new URL("../../.env", import.meta.url));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
 
 const config = getConfig();
-const store = new PostgresStore(config.DATABASE_URL);
+const store: Store = config.DEMO_MODE
+  ? new MemoryStore()
+  : new PostgresStore(config.DATABASE_URL);
+if (config.DEMO_MODE) await store.savePools(demoPools);
 const ston = new StonService(config);
 const app = await buildApp({ config, store, ston });
 const jobs = new Jobs(config, store, ston);
@@ -44,14 +58,16 @@ const refreshPoolsSafely = () => {
     app.log.error({ err: error }, "Pool catalog refresh failed"),
   );
 };
-const poolTimer = setInterval(refreshPoolsSafely, 15 * 60_000);
-poolTimer.unref();
+const poolTimer = config.DEMO_MODE
+  ? undefined
+  : setInterval(refreshPoolsSafely, 15 * 60_000);
+poolTimer?.unref();
 
 const shutdown = async () => {
   clearInterval(jobTimer);
-  clearInterval(poolTimer);
+  if (poolTimer) clearInterval(poolTimer);
   await app.close();
-  await store.close();
+  if (store instanceof PostgresStore) await store.close();
 };
 
 process.on("SIGINT", () => void shutdown());
@@ -59,4 +75,4 @@ process.on("SIGTERM", () => void shutdown());
 
 await app.listen({ host: config.HOST, port: config.PORT });
 runJobsSafely();
-refreshPoolsSafely();
+if (!config.DEMO_MODE) refreshPoolsSafely();

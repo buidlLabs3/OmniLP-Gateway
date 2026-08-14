@@ -56,6 +56,9 @@ const config: Config = {
   UPSTREAM_TIMEOUT_MS: 100,
   UPSTREAM_RETRIES: 0,
   READ_ONLY: true,
+  DEMO_MODE: true,
+  TELEGRAM_BOT_TOKEN: undefined,
+  TELEGRAM_MAX_AGE_SECONDS: 900,
   SESSION_SECRET: "test-session-secret-that-is-long-enough",
   TON_DEPOSIT_GAS_UNITS: "300000000",
 };
@@ -117,12 +120,22 @@ async function setup() {
   const auth = {
     verifySession: () => undefined,
   };
+  const telegram = {
+    start: () => ({
+      user: { id: "test", firstName: "Test" },
+      demo: true,
+      token: "test",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }),
+    verifySession: () => undefined,
+  };
   const app = await buildApp({
     config,
     store,
     omni: omni as never,
     ston: ston as never,
     auth: auth as never,
+    telegram: telegram as never,
   });
   apps.push(app);
   return { app, store };
@@ -135,6 +148,7 @@ async function setupWithConfig(value: Config) {
     config: value,
     store,
     auth: { verifySession: () => undefined } as never,
+    telegram: { verifySession: () => undefined } as never,
   });
   apps.push(app);
   return { app, store };
@@ -149,6 +163,41 @@ const flowBody = {
 } as const;
 
 describe("flow API", () => {
+  it("binds flow creation to a valid Telegram launch session", async () => {
+    const store = new MemoryStore();
+    await store.savePools([pool]);
+    const app = await buildApp({
+      config,
+      store,
+      auth: { verifySession: () => undefined } as never,
+    });
+    apps.push(app);
+    const blocked = await app.inject({
+      method: "POST",
+      url: "/v1/flows",
+      headers: { "idempotency-key": "telegram-flow-0001" },
+      payload: flowBody,
+    });
+    expect(blocked.statusCode).toBe(401);
+
+    const launch = await app.inject({
+      method: "POST",
+      url: "/v1/telegram/session",
+      payload: { initData: "", demo: true },
+    });
+    expect(launch.statusCode).toBe(200);
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/flows",
+      headers: {
+        "idempotency-key": "telegram-flow-0002",
+        "x-telegram-session": launch.json().token as string,
+      },
+      payload: flowBody,
+    });
+    expect(created.statusCode).toBe(200);
+  });
+
   it("creates one flow for duplicate idempotent requests without exposing wallets", async () => {
     const { app, store } = await setup();
     const headers = { "idempotency-key": "flow-request-0001" };

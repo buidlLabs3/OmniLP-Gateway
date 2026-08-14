@@ -1,13 +1,18 @@
 "use client";
 
 import { formatAmount, parseAmount } from "@omnilp/shared";
+import { TonConnectButton, useTonAddress } from "@tonconnect/ui-react";
 import {
-  Activity,
+  ArrowDown,
   ArrowRight,
-  CircleDollarSign,
-  Database,
+  Check,
+  ChevronRight,
+  CircleAlert,
+  Clock3,
+  Copy,
+  ExternalLink,
+  History,
   RefreshCw,
-  Search,
   ShieldCheck,
   Wallet,
 } from "lucide-react";
@@ -24,11 +29,16 @@ import {
   getFlow,
   getImpact,
   getPools,
+  startTelegramSession,
   type FlowView,
   type Impact,
   type Pool,
+  type TelegramSession,
 } from "../lib/api";
+import { startTelegram, tap } from "../lib/telegram";
 
+const demoBase = "0x1111111111111111111111111111111111111111";
+const demoTon = `0:${"9".repeat(64)}`;
 const emptyImpact: Impact = {
   checkedAt: new Date(0).toISOString(),
   routedUsdcUnits: "0",
@@ -43,33 +53,49 @@ const emptyImpact: Impact = {
   pools: [],
 };
 
-function money(units: string): string {
-  const [whole = "0", fraction = ""] = formatAmount(units, 6, 2).split(".");
-  return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${fraction.padEnd(2, "0")}`;
+function money(units: string, decimals = 0): string {
+  const value = Number(formatAmount(units, 6, decimals));
+  return `$${value.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })}`;
 }
 
 function short(value: string): string {
-  return value.length > 14
-    ? `${value.slice(0, 7)}...${value.slice(-5)}`
+  return value.length > 13
+    ? `${value.slice(0, 6)}...${value.slice(-4)}`
     : value;
 }
 
+function stateLabel(value: string): string {
+  return value.replaceAll("_", " ");
+}
+
 export default function Home() {
+  const connectedTon = useTonAddress(false);
+  const [tab, setTab] = useState<"enter" | "activity">("enter");
+  const [session, setSession] = useState<TelegramSession | null>(null);
   const [pools, setPools] = useState<Pool[]>([]);
   const [impact, setImpact] = useState<Impact>(emptyImpact);
   const [selected, setSelected] = useState("");
-  const [query, setQuery] = useState("");
+  const [amount, setAmount] = useState("25");
   const [baseWallet, setBaseWallet] = useState("");
-  const [tonWallet, setTonWallet] = useState("");
-  const [amount, setAmount] = useState("10");
+  const [demoWallets, setDemoWallets] = useState(false);
   const [flowId, setFlowId] = useState("");
   const [flow, setFlow] = useState<FlowView | null>(null);
-  const [status, setStatus] = useState("Connecting to gateway");
+  const [launch, setLaunch] = useState<"loading" | "telegram" | "browser">(
+    "loading",
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const tonWallet = connectedTon || (demoWallets ? demoTon : "");
+  const activePool = useMemo(
+    () => pools.find((pool) => pool.id === selected) ?? null,
+    [pools, selected],
+  );
+
   const load = useCallback(async () => {
-    setError("");
     const [poolResult, impactResult] = await Promise.allSettled([
       getPools(),
       getImpact(),
@@ -82,45 +108,51 @@ export default function Home() {
       );
     }
     if (impactResult.status === "fulfilled") setImpact(impactResult.value);
-    if (
-      poolResult.status === "rejected" ||
-      impactResult.status === "rejected"
-    ) {
-      setStatus("Gateway unavailable");
-      setError("The API or database is not reachable.");
-    } else {
-      setStatus("Read-only pilot");
+    if (poolResult.status === "rejected") {
+      setError("Gateway is offline. Start the local demo server and retry.");
     }
   }, []);
 
   useEffect(() => {
+    const telegram = startTelegram();
+    setLaunch(telegram?.initData ? "telegram" : "browser");
+    if (telegram?.initData) {
+      void startTelegramSession(telegram.initData)
+        .then(setSession)
+        .catch((cause: unknown) =>
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Telegram session could not be verified.",
+          ),
+        );
+    }
     void load();
+    const recent = localStorage.getItem("omnilp.flow");
+    if (recent) setFlowId(recent);
   }, [load]);
 
-  const shownPools = useMemo(() => {
-    const value = query.trim().toLowerCase();
-    return pools.filter(
-      (pool) =>
-        !value ||
-        pool.id.includes(value) ||
-        pool.token0.symbol.toLowerCase().includes(value) ||
-        pool.token1.symbol.toLowerCase().includes(value),
-    );
-  }, [pools, query]);
+  async function openPreview() {
+    setBusy(true);
+    setError("");
+    try {
+      const next = await startTelegramSession("", true);
+      setSession(next);
+      setDemoWallets(true);
+      setBaseWallet(demoBase);
+      tap("success");
+    } catch (cause) {
+      tap("error");
+      setError(cause instanceof Error ? cause.message : "Preview unavailable.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function connectBase() {
-    const provider = (
-      window as Window & {
-        ethereum?: {
-          request: (input: {
-            method: string;
-            params?: unknown[];
-          }) => Promise<unknown>;
-        };
-      }
-    ).ethereum;
+    const provider = window.ethereum;
     if (!provider) {
-      setError("No injected Base wallet was found.");
+      setError("No Base wallet was found in this browser.");
       return;
     }
     setError("");
@@ -132,16 +164,20 @@ export default function Home() {
       const accounts = await provider.request({
         method: "eth_requestAccounts",
       });
-      if (!Array.isArray(accounts) || typeof accounts[0] !== "string")
-        throw new Error();
+      if (!Array.isArray(accounts) || typeof accounts[0] !== "string") {
+        throw new Error("Wallet did not return an account.");
+      }
       setBaseWallet(accounts[0]);
+      tap("success");
     } catch {
+      tap("error");
       setError("Base wallet connection was not completed.");
     }
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!session) return;
     setBusy(true);
     setError("");
     try {
@@ -153,9 +189,13 @@ export default function Home() {
       });
       setFlow(created);
       setFlowId(created.id);
+      localStorage.setItem("omnilp.flow", created.id);
+      setTab("activity");
+      tap("success");
     } catch (cause) {
+      tap("error");
       setError(
-        cause instanceof Error ? cause.message : "Flow could not be created.",
+        cause instanceof Error ? cause.message : "Flow was not created.",
       );
     } finally {
       setBusy(false);
@@ -164,227 +204,355 @@ export default function Home() {
 
   async function resume(event: FormEvent) {
     event.preventDefault();
+    if (!flowId.trim()) return;
     setBusy(true);
     setError("");
     try {
-      setFlow(await getFlow(flowId.trim()));
+      const next = await getFlow(flowId.trim());
+      setFlow(next);
+      localStorage.setItem("omnilp.flow", next.id);
+      tap("success");
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Flow could not be loaded.",
-      );
+      tap("error");
+      setError(cause instanceof Error ? cause.message : "Flow was not found.");
     } finally {
       setBusy(false);
     }
   }
 
+  function selectPool(id: string) {
+    setSelected(id);
+    tap();
+  }
+
+  async function copyFlow() {
+    if (!flow) return;
+    await navigator.clipboard.writeText(flow.id);
+    tap("success");
+  }
+
   return (
-    <main>
-      <header className="topbar">
-        <div className="brand">
-          <span className="mark" aria-hidden="true">
-            <span />
+    <main className="app-shell">
+      <header className="app-head">
+        <div className="identity">
+          <span className="brand-mark" aria-hidden="true">
+            OL
           </span>
           <div>
-            <strong>OmniLP Gateway</strong>
-            <small>STON.fi liquidity ingress</small>
+            <strong>OmniLP</strong>
+            <span>
+              {session?.user.firstName ??
+                (launch === "loading" ? "Opening..." : "Telegram Gateway")}
+            </span>
           </div>
         </div>
-        <div className="top-actions">
-          <span className="runtime">
-            <span />
-            {status}
+        <div className="head-actions">
+          <span className={`mode ${session?.demo ? "demo" : ""}`}>
+            {session?.demo ? "Demo" : session ? "Verified" : "Read only"}
           </span>
           <button
             className="icon-button"
             type="button"
-            title="Refresh data"
+            title="Refresh pools"
             onClick={() => void load()}
           >
-            <RefreshCw size={17} />
+            <RefreshCw size={18} />
           </button>
         </div>
       </header>
 
-      <section className="metrics" aria-label="Protocol impact">
-        <div>
-          <CircleDollarSign size={18} />
-          <span>Routed volume</span>
-          <strong>{money(impact.routedUsdcUnits)}</strong>
-        </div>
-        <div>
-          <Database size={18} />
-          <span>Deposited TVL</span>
-          <strong>{money(impact.depositedUsdUnits)}</strong>
-        </div>
-        <div>
-          <ShieldCheck size={18} />
-          <span>Completed entries</span>
-          <strong>{impact.completedEntries}</strong>
-        </div>
-        <div>
-          <Activity size={18} />
-          <span>Pools reached</span>
-          <strong>{impact.pools.length}</strong>
-        </div>
-      </section>
+      <nav className="app-tabs" aria-label="Gateway views">
+        <button
+          type="button"
+          className={tab === "enter" ? "active" : ""}
+          onClick={() => setTab("enter")}
+        >
+          Enter
+        </button>
+        <button
+          type="button"
+          className={tab === "activity" ? "active" : ""}
+          onClick={() => setTab("activity")}
+        >
+          Activity
+          {flowId && <span className="tab-dot" />}
+        </button>
+      </nav>
 
-      <div className="workspace">
-        <section className="catalog">
-          <div className="section-head">
-            <div>
-              <h1>Approved pools</h1>
-              <p>{pools.filter((pool) => pool.enabled).length} available</p>
-            </div>
-            <label className="search">
-              <Search size={16} />
+      {tab === "enter" ? (
+        <form className="entry" onSubmit={(event) => void submit(event)}>
+          <section className="amount-section">
+            <label htmlFor="amount">You send from Base</label>
+            <div className="amount-row">
+              <span>$</span>
               <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Filter pools"
-                aria-label="Filter pools"
+                id="amount"
+                inputMode="decimal"
+                aria-label="USDC amount"
+                value={amount}
+                onChange={(event) => setAmount(event.target.value)}
               />
-            </label>
+              <b>USDC</b>
+            </div>
+            <span className="limit">Pilot limit $10 - $1,000</span>
+          </section>
+
+          <div className="route-step" aria-hidden="true">
+            <span />
+            <ArrowDown size={15} />
+            <span />
           </div>
-          <div className="pool-list">
-            {shownPools.map((pool) => (
-              <button
-                key={pool.id}
-                className={`pool-row ${selected === pool.id ? "selected" : ""}`}
-                type="button"
-                disabled={!pool.enabled}
-                onClick={() => setSelected(pool.id)}
-              >
-                <span className="pair">
-                  <span className="token">
-                    {pool.token1.symbol.slice(0, 2)}
+
+          <section className="pool-section">
+            <div className="section-title">
+              <div>
+                <span>Destination</span>
+                <h1>STON.fi pool</h1>
+              </div>
+              <small>{pools.filter((pool) => pool.enabled).length} live</small>
+            </div>
+            <div className="pool-options">
+              {pools.map((pool) => (
+                <button
+                  key={pool.id}
+                  type="button"
+                  className={selected === pool.id ? "selected" : ""}
+                  disabled={!pool.enabled}
+                  onClick={() => selectPool(pool.id)}
+                >
+                  <span className="pair-icons" aria-hidden="true">
+                    <i>{pool.token0.symbol.slice(0, 1)}</i>
+                    <i>{pool.token1.symbol.slice(0, 1)}</i>
                   </span>
-                  <span>
+                  <span className="pool-name">
                     <strong>
                       {pool.token0.symbol} / {pool.token1.symbol}
                     </strong>
-                    <small>{short(pool.address)}</small>
+                    <small>{pool.entryMode} entry</small>
                   </span>
-                </span>
-                <span>
-                  <small>TVL</small>
-                  <strong>{money(pool.tvlUsdUnits)}</strong>
-                </span>
-                <span>
-                  <small>24h volume</small>
-                  <strong>{money(pool.volume24hUsdUnits)}</strong>
-                </span>
-                <span className={pool.enabled ? "enabled" : "disabled"}>
-                  {pool.enabled ? "Ready" : "Locked"}
-                </span>
-              </button>
-            ))}
-            {shownPools.length === 0 && (
-              <div className="empty">
-                <Database size={20} />
-                <span>No approved pool data</span>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <aside className="flow-panel">
-          <div className="tabs">
-            <button className="active" type="button">
-              New entry
-            </button>
-            <button type="button" disabled>
-              Exit
-            </button>
-          </div>
-          <form onSubmit={(event) => void submit(event)}>
-            <label>
-              Source amount
-              <span className="amount-input">
-                <input
-                  value={amount}
-                  inputMode="decimal"
-                  onChange={(event) => setAmount(event.target.value)}
-                />
-                <b>USDC</b>
-              </span>
-            </label>
-            <label>
-              Base wallet
-              <span className="wallet-input">
-                <input
-                  value={baseWallet}
-                  onChange={(event) => setBaseWallet(event.target.value)}
-                  placeholder="0x..."
-                />
-                <button type="button" onClick={() => void connectBase()}>
-                  <Wallet size={16} />
-                  Connect
+                  <span className="pool-stat">
+                    <small>TVL</small>
+                    <strong>{money(pool.tvlUsdUnits)}</strong>
+                  </span>
+                  {selected === pool.id ? (
+                    <Check className="pool-check" size={18} />
+                  ) : (
+                    <ChevronRight size={18} />
+                  )}
                 </button>
-              </span>
-            </label>
-            <label>
-              TON wallet
-              <input
-                value={tonWallet}
-                onChange={(event) => setTonWallet(event.target.value)}
-                placeholder="EQ... or 0:..."
-              />
-            </label>
-            <label>
-              Destination pool
-              <select
-                value={selected}
-                onChange={(event) => setSelected(event.target.value)}
-              >
-                <option value="">Select a pool</option>
-                {pools
-                  .filter((pool) => pool.enabled)
-                  .map((pool) => (
-                    <option key={pool.id} value={pool.id}>
-                      {pool.token0.symbol} / {pool.token1.symbol}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <button
-              className="primary"
-              type="submit"
-              disabled={busy || !selected || !baseWallet || !tonWallet}
-            >
-              {busy ? "Creating..." : "Create review"}
-              <ArrowRight size={17} />
-            </button>
-          </form>
-
-          <div className="resume">
-            <h2>Resume flow</h2>
-            <form onSubmit={(event) => void resume(event)}>
-              <input
-                value={flowId}
-                onChange={(event) => setFlowId(event.target.value)}
-                placeholder="Flow ID"
-                aria-label="Flow ID"
-              />
-              <button className="icon-button" title="Load flow" disabled={busy}>
-                <ArrowRight size={17} />
-              </button>
-            </form>
-          </div>
-
-          {flow && (
-            <div className="flow-result">
-              <span>Current state</span>
-              <strong>{flow.state.replaceAll("_", " ")}</strong>
-              <code>{flow.id}</code>
+              ))}
+              {!pools.length && (
+                <button className="empty-pool" type="button" disabled>
+                  No approved pools loaded
+                </button>
+              )}
             </div>
-          )}
+          </section>
+
+          <section className="wallet-section">
+            <div className="section-title">
+              <div>
+                <span>Signatures</span>
+                <h2>Wallets</h2>
+              </div>
+              <ShieldCheck size={19} />
+            </div>
+            <div className="wallet-row">
+              <span className="chain base">B</span>
+              <span>
+                <strong>Base</strong>
+                <small>
+                  {baseWallet ? short(baseWallet) : "Not connected"}
+                </small>
+              </span>
+              <button type="button" onClick={() => void connectBase()}>
+                {baseWallet ? "Change" : "Connect"}
+              </button>
+            </div>
+            <div className="wallet-row">
+              <span className="chain ton">T</span>
+              <span>
+                <strong>TON</strong>
+                <small>{tonWallet ? short(tonWallet) : "Not connected"}</small>
+              </span>
+              <div className="ton-connect">
+                {demoWallets && !connectedTon ? (
+                  <span className="demo-connected">
+                    <Check size={14} />
+                    Demo
+                  </span>
+                ) : (
+                  <TonConnectButton />
+                )}
+              </div>
+            </div>
+            {session?.demo && (
+              <button
+                className="demo-wallets"
+                type="button"
+                onClick={() => {
+                  setDemoWallets(true);
+                  setBaseWallet(demoBase);
+                  tap();
+                }}
+              >
+                <Wallet size={16} />
+                Restore demo wallets
+              </button>
+            )}
+          </section>
+
+          <section className="impact-strip" aria-label="Gateway impact">
+            <div>
+              <small>Routed</small>
+              <strong>{money(impact.routedUsdcUnits)}</strong>
+            </div>
+            <div>
+              <small>Entries</small>
+              <strong>{impact.completedEntries}</strong>
+            </div>
+            <div>
+              <small>Pools</small>
+              <strong>{impact.pools.length}</strong>
+            </div>
+          </section>
+
           {error && (
-            <p className="error" role="alert">
+            <p className="notice error" role="alert">
+              <CircleAlert size={17} />
               {error}
             </p>
           )}
-        </aside>
-      </div>
+
+          <div className="action-bar">
+            {!session ? (
+              <button
+                className="primary"
+                type="button"
+                disabled={busy}
+                onClick={() => void openPreview()}
+              >
+                {busy ? "Opening..." : "Open preview"}
+                <ArrowRight size={18} />
+              </button>
+            ) : (
+              <button
+                className="primary"
+                type="submit"
+                disabled={
+                  busy || !activePool || !baseWallet || !tonWallet || !amount
+                }
+              >
+                {busy ? "Creating..." : "Create review"}
+                <ArrowRight size={18} />
+              </button>
+            )}
+            <span>
+              {session?.demo
+                ? "Preview only. No funds move."
+                : "Execution stays locked until route verification passes."}
+            </span>
+          </div>
+        </form>
+      ) : (
+        <section className="activity-view">
+          <div className="activity-head">
+            <div>
+              <span>Persistent state</span>
+              <h1>Activity</h1>
+            </div>
+            <History size={20} />
+          </div>
+
+          <form
+            className="resume-form"
+            onSubmit={(event) => void resume(event)}
+          >
+            <input
+              aria-label="Flow ID"
+              placeholder="Flow ID"
+              value={flowId}
+              onChange={(event) => setFlowId(event.target.value)}
+            />
+            <button type="submit" title="Load flow" disabled={busy || !flowId}>
+              <ArrowRight size={18} />
+            </button>
+          </form>
+
+          {flow ? (
+            <div className="flow-status">
+              <div className="flow-title">
+                <span>
+                  <strong>{activePool?.token0.symbol ?? "USDC"}</strong>
+                  <ArrowRight size={15} />
+                  <strong>{activePool?.token1.symbol ?? flow.poolId}</strong>
+                </span>
+                <b>{stateLabel(flow.state)}</b>
+              </div>
+              <button
+                className="flow-id"
+                type="button"
+                onClick={() => void copyFlow()}
+              >
+                <code>{short(flow.id)}</code>
+                <Copy size={15} />
+              </button>
+              <ol className="timeline">
+                <li className="done">
+                  <span>
+                    <Check size={13} />
+                  </span>
+                  <div>
+                    <strong>Review created</strong>
+                    <small>Saved and resumable</small>
+                  </div>
+                </li>
+                <li className="current">
+                  <span>
+                    <Clock3 size={13} />
+                  </span>
+                  <div>
+                    <strong>Wallet proof</strong>
+                    <small>Required before a quote</small>
+                  </div>
+                </li>
+                <li>
+                  <span />
+                  <div>
+                    <strong>Route execution</strong>
+                    <small>Locked in this pilot</small>
+                  </div>
+                </li>
+              </ol>
+              <button className="secondary" type="button" disabled>
+                View route receipt
+                <ExternalLink size={16} />
+              </button>
+            </div>
+          ) : (
+            <div className="empty-activity">
+              <History size={24} />
+              <strong>No flow loaded</strong>
+              <span>Create a review or enter its ID.</span>
+            </div>
+          )}
+
+          {error && (
+            <p className="notice error" role="alert">
+              <CircleAlert size={17} />
+              {error}
+            </p>
+          )}
+        </section>
+      )}
     </main>
   );
+}
+
+declare global {
+  interface Window {
+    ethereum?: {
+      request(input: { method: string; params?: unknown[] }): Promise<unknown>;
+    };
+  }
 }
