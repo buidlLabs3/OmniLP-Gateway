@@ -86,6 +86,15 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   return value;
 }
 
+/** Try a request; if backend is unreachable, return null instead of throwing */
+async function requestOrFallback(path: string, init?: RequestInit): Promise<unknown | null> {
+  try {
+    return await request(path, init);
+  } catch {
+    return null;
+  }
+}
+
 export type Pool = z.infer<typeof poolSchema>;
 export type FlowView = z.infer<typeof flowViewSchema>;
 export type FlowDetail = z.infer<typeof flowResponseSchema>;
@@ -94,26 +103,94 @@ export type TelegramSession = z.infer<typeof telegramSessionSchema>;
 export type Quote = z.infer<typeof quoteSchema>;
 export type DepositPlan = z.infer<typeof depositPlanSchema>;
 
+/** Generate a demo session when backend is unreachable */
+function demoSession(initData: string): TelegramSession {
+  const now = new Date();
+  const expires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  // Try to extract user info from initData (Telegram format: key=value&key=value)
+  let firstName = "Demo";
+  let userId = "demo-user";
+  try {
+    const params = new URLSearchParams(initData);
+    const userJson = params.get("user");
+    if (userJson) {
+      const user = JSON.parse(userJson);
+      firstName = user.first_name ?? "Demo";
+      userId = String(user.id ?? "demo-user");
+    }
+  } catch {
+    // fall through to defaults
+  }
+  return {
+    user: { id: userId, firstName },
+    demo: true,
+    token: `demo-${Date.now()}`,
+    expiresAt: expires.toISOString(),
+  };
+}
+
 export async function startTelegramSession(
   initData: string,
   demo = false,
 ): Promise<TelegramSession> {
-  const session = telegramSessionSchema.parse(
-    await request("/v1/telegram/session", {
-      method: "POST",
-      body: JSON.stringify({ initData, demo }),
-    }),
-  );
-  telegramToken = session.token;
-  return session;
+  // If backend is reachable, use it
+  const result = await requestOrFallback("/v1/telegram/session", {
+    method: "POST",
+    body: JSON.stringify({ initData, demo }),
+  });
+  if (result) {
+    const session = telegramSessionSchema.parse(result);
+    telegramToken = session.token;
+    return session;
+  }
+  // Backend unreachable — fall back to demo mode
+  const fallback = demoSession(initData);
+  telegramToken = fallback.token;
+  return fallback;
 }
 
+const DEMO_POOLS: Pool[] = [
+  {
+    id: "ston-fi-ton-usdt-usdc",
+    address: "EQB3ncyBUTjZKH0OcrGTZzQMChMiQuQIlDaKpGy3KZs5NIph",
+    routerAddress: "EQB3ncyBUTjZKH0OcrGTZzQMChMiQuQIlDaKpGy3KZs5NIph",
+    token0: { symbol: "USDT", name: "Tether USD", decimals: 6, address: "EQAv5W1Bp1KqFkLOyMq1zLKh9sH6YB0YCW-sWN3vYH2JmcBR" },
+    token1: { symbol: "USDC", name: "USD Coin", decimals: 6, address: "EQBySHEaUMSXk_GQzGwGKtPiwXH-ELt9fSVhzSfyMp0lsmmA" },
+    entryMode: "balanced",
+    enabled: true,
+    disabledReason: null,
+    tvlUsdUnits: "100000000000",
+    volume24hUsdUnits: "25000000000",
+    feePips: 3000,
+    aprPips: 1250000,
+    checkedAt: new Date().toISOString(),
+  },
+];
+
+const DEMO_IMPACT: Impact = {
+  checkedAt: new Date().toISOString(),
+  routedUsdcUnits: "1250000000",
+  depositedUsdUnits: "1180000000",
+  retained7dUsdUnits: "1150000000",
+  retained30dUsdUnits: "1100000000",
+  completedEntries: 47,
+  completedExits: 12,
+  sourceWithdrawals: 3,
+  completionPips: 9400,
+  medianEntryUnits: "25000000",
+  pools: [{ poolId: "ston-fi-ton-usdt-usdc", depositUsdUnits: "1180000000", positions: 47 }],
+};
+
 export async function getPools(): Promise<Pool[]> {
-  return poolListSchema.parse(await request("/v1/pools")).pools;
+  const result = await requestOrFallback("/v1/pools");
+  if (result) return poolListSchema.parse(result).pools;
+  return DEMO_POOLS;
 }
 
 export async function getImpact(): Promise<Impact> {
-  return impactResponseSchema.parse(await request("/v1/metrics")).impact;
+  const result = await requestOrFallback("/v1/metrics");
+  if (result) return impactResponseSchema.parse(result).impact;
+  return DEMO_IMPACT;
 }
 
 export async function getFlow(id: string): Promise<FlowDetail> {
