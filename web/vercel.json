@@ -1,0 +1,6 @@
+{
+  "installCommand": "cd .. && npm install -g pnpm@10.24.0 && pnpm install && cd web",
+  "buildCommand": "cd .. && pnpm --filter @omnilp/shared build && cd web && pnpm build",
+  "framework": "nextjs",
+  "outputDirectory": ".next"
+}
