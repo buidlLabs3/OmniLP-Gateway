@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "buildCommand": "cd shared && npm run build && cd ../server && npx tsc -p tsconfig.json",
+  "outputDirectory": "server/dist",
+  "installCommand": "npm install && cd shared && npm install && cd ../server && npm install",
+  "framework": null,
+  "functions": {
+    "server/api/index.ts": {
+      "maxDuration": 30
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "server/api/index.ts"
+    },
+    {
+      "src": "/v1/(.*)",
+      "dest": "server/api/index.ts"
+    }
+  ]
+}
