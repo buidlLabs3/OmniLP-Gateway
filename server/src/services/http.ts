@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { AppError } from "@omnilp/shared";
 
-const MAX_BODY_BYTES = 10_000_000;
+const MAX_BODY_BYTES = 64_000_000;
 
 export interface ReadOptions {
   timeoutMs: number;

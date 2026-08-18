@@ -19,6 +19,7 @@ import type {
   JobRecord,
   PositionRecord,
   Store,
+  TradeRecord,
   TransactionRecord,
   WalletChallenge,
 } from "./types.js";
@@ -32,6 +33,7 @@ export class MemoryStore implements Store {
   private readonly plans = new Map<string, DepositPlan>();
   private readonly idempotency = new Map<string, IdempotencyRecord>();
   private readonly transactions = new Map<string, TransactionRecord>();
+  private readonly trades = new Map<string, TradeRecord>();
   private readonly positions = new Map<string, PositionRecord>();
   private readonly jobs = new Map<
     string,
@@ -87,6 +89,62 @@ export class MemoryStore implements Store {
 
   async getPlan(flowId: string): Promise<DepositPlan | null> {
     return structuredClone(this.plans.get(flowId) ?? null);
+  }
+
+  async getReceivedUnits(flowId: string): Promise<string | null> {
+    const trade = [...this.trades.values()]
+      .filter((item) => item.flowId === flowId)
+      .sort(
+        (left, right) =>
+          Date.parse(left.checkedAt) - Date.parse(right.checkedAt),
+      )
+      .at(-1);
+    return trade?.receivedUnits ?? null;
+  }
+
+  async saveTrade(input: Omit<TradeRecord, "id">): Promise<TradeRecord> {
+    const existing = [...this.trades.values()].find(
+      (t) => t.flowId === input.flowId,
+    );
+    if (existing) {
+      if (
+        existing.quoteId !== input.quoteId ||
+        existing.orderHash !== input.orderHash
+      ) {
+        throw new AppError(
+          "CONFLICT",
+          "Trade already exists with different data",
+          409,
+        );
+      }
+      return structuredClone(existing);
+    }
+    const trade: TradeRecord = { id: randomUUID(), ...input };
+    this.trades.set(trade.id, structuredClone(trade));
+    return structuredClone(trade);
+  }
+
+  async getTrade(flowId: string): Promise<TradeRecord | null> {
+    const trade = [...this.trades.values()]
+      .filter((t) => t.flowId === flowId)
+      .sort(
+        (left, right) =>
+          Date.parse(left.checkedAt) - Date.parse(right.checkedAt),
+      )
+      .at(-1);
+    return trade ? structuredClone(trade) : null;
+  }
+
+  async updateTrade(
+    id: string,
+    update: Partial<
+      Pick<TradeRecord, "status" | "receivedUnits" | "reference" | "checkedAt">
+    >,
+  ): Promise<TradeRecord> {
+    const trade = this.trades.get(id);
+    if (!trade) throw new AppError("NOT_FOUND", "Trade not found", 404);
+    Object.assign(trade, update);
+    return structuredClone(trade);
   }
 
   async createFlow(input: CreateFlow): Promise<Flow> {

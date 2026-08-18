@@ -146,6 +146,15 @@ function chainOf(address) {
 }
 
 function orderData(quote) {
+  const direct = quote?.order;
+  if (
+    direct &&
+    typeof direct === "object" &&
+    !Array.isArray(direct) &&
+    Object.keys(direct).length > 0
+  ) {
+    return direct;
+  }
   const settlement = field(quote, "settlement_data", "settlementData");
   if (
     settlement?.order &&

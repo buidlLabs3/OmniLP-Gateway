@@ -18,7 +18,7 @@ class FakeSocket extends EventTarget {
     const noQuote = new MessageEvent("message", {
       data: JSON.stringify({ params: { result: { noQuote: {} } } }),
     });
-    assert.equal(request.method, "v1beta8.quote");
+    assert.equal(request.method, "stonfi.omni.v1beta8.QuoteRpc.Quote");
     assert.equal(request.params.inputUnits, "10000000");
     queueMicrotask(() => {
       this.dispatchEvent(ack);
@@ -78,7 +78,7 @@ test("stops cleanly when an acknowledged request has no quote", async () => {
   const result = await quoteOnce(makeQuoteRequest("entry", "10"), {
     WebSocketClass: FakeSocket,
     apiUrl: "wss://example.test",
-    method: "v1beta8.quote",
+    method: "stonfi.omni.v1beta8.QuoteRpc.Quote",
     timeoutMs: 100,
   });
   assert.deepEqual(result, { rfqId: "rfq-1", quote: null });

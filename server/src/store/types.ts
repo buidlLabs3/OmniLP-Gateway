@@ -56,6 +56,17 @@ export interface WalletChallenge {
   usedAt: string | null;
 }
 
+export interface TradeRecord {
+  id: string;
+  flowId: string;
+  quoteId: string;
+  orderHash: string;
+  status: "registered" | "matched" | "settling" | "filled" | "partial" | "failed" | "expired";
+  receivedUnits: string | null;
+  reference: string | null;
+  checkedAt: string;
+}
+
 export interface Store {
   health(): Promise<boolean>;
   listPools(): Promise<Pool[]>;
@@ -65,6 +76,7 @@ export interface Store {
   getQuote(flowId: string): Promise<Quote | null>;
   savePlan(plan: DepositPlan): Promise<DepositPlan>;
   getPlan(flowId: string): Promise<DepositPlan | null>;
+  getReceivedUnits(flowId: string): Promise<string | null>;
   createFlow(input: CreateFlow): Promise<Flow>;
   listFlows(): Promise<Flow[]>;
   getFlow(id: string): Promise<Flow | null>;
@@ -111,6 +123,9 @@ export interface Store {
     reference: string,
     position?: Omit<PositionRecord, "id">,
   ): Promise<Flow>;
+  saveTrade(input: Omit<TradeRecord, "id">): Promise<TradeRecord>;
+  getTrade(flowId: string): Promise<TradeRecord | null>;
+  updateTrade(id: string, update: Partial<Pick<TradeRecord, "status" | "receivedUnits" | "reference" | "checkedAt">>): Promise<TradeRecord>;
   saveChallenge(
     input: Omit<WalletChallenge, "id" | "usedAt">,
   ): Promise<WalletChallenge>;

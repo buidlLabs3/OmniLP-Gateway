@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import { makeQuoteRequest, validateQuote } from "./route.mjs";
 
 const apiUrl = process.env.OMNISTON_WS_URL ?? "wss://omni-ws-sandbox.ston.fi";
-const method = process.env.OMNISTON_QUOTE_METHOD ?? "v1beta8.quote";
+const method =
+  process.env.OMNISTON_QUOTE_METHOD ?? "stonfi.omni.v1beta8.QuoteRpc.Quote";
 const timeoutMs = Number(process.env.OMNISTON_TIMEOUT_MS ?? "20000");
 const amountList = process.env.USDC_AMOUNTS ?? "10,250,1000";
 
@@ -102,8 +103,10 @@ function quoteOnce(request, options = {}) {
 
   if (!WebSocketClass)
     throw new Error("This Node runtime has no WebSocket support");
-  if (quoteMethod !== "v1beta8.quote") {
-    throw new Error("Omniston quote method must be v1beta8.quote");
+  if (quoteMethod !== "stonfi.omni.v1beta8.QuoteRpc.Quote") {
+    throw new Error(
+      "Omniston quote method must be stonfi.omni.v1beta8.QuoteRpc.Quote",
+    );
   }
 
   return new Promise((resolve, reject) => {

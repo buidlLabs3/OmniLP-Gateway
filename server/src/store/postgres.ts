@@ -23,6 +23,7 @@ import type {
   JobRecord,
   PositionRecord,
   Store,
+  TradeRecord,
   TransactionRecord,
   WalletChallenge,
 } from "./types.js";
@@ -261,6 +262,16 @@ export class PostgresStore implements Store {
       ],
     );
     return value;
+  }
+
+  async getReceivedUnits(flowId: string): Promise<string | null> {
+    const result = await this.pool.query<{ received_units: string | null }>(
+      `SELECT received_units FROM trade
+       WHERE flow_id = $1 AND received_units IS NOT NULL
+       ORDER BY checked_at DESC LIMIT 1`,
+      [flowId],
+    );
+    return result.rows[0]?.received_units ?? null;
   }
 
   async getPlan(flowId: string): Promise<DepositPlan | null> {
@@ -904,6 +915,150 @@ export class PostgresStore implements Store {
       attempt: row.attempt,
       confirmedAt: row.confirmed_at?.toISOString() ?? null,
     }));
+  }
+
+  async saveTrade(input: Omit<TradeRecord, "id">): Promise<TradeRecord> {
+    const inserted = await this.pool.query<{
+      id: string;
+      flow_id: string;
+      quote_id: string;
+      order_hash: string;
+      status: TradeRecord["status"];
+      received_units: string | null;
+      reference: string | null;
+      checked_at: Date;
+    }>(
+      `INSERT INTO trade (id, flow_id, quote_id, order_hash, status, received_units, reference, checked_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT DO NOTHING
+       RETURNING *`,
+      [
+        randomUUID(),
+        input.flowId,
+        input.quoteId,
+        input.orderHash,
+        input.status,
+        input.receivedUnits,
+        input.reference,
+        input.checkedAt,
+      ],
+    );
+    let row = inserted.rows[0];
+    if (!row) {
+      const existing = await this.pool.query<{
+        id: string;
+        flow_id: string;
+        quote_id: string;
+        order_hash: string;
+        status: TradeRecord["status"];
+        received_units: string | null;
+        reference: string | null;
+        checked_at: Date;
+      }>("SELECT * FROM trade WHERE flow_id = $1", [input.flowId]);
+      row = existing.rows[0];
+      if (
+        !row ||
+        row.quote_id !== input.quoteId ||
+        row.order_hash !== input.orderHash
+      ) {
+        throw new AppError("CONFLICT", "Trade already exists with different data", 409);
+      }
+    }
+    return {
+      id: row.id,
+      flowId: row.flow_id,
+      quoteId: row.quote_id,
+      orderHash: row.order_hash,
+      status: row.status,
+      receivedUnits: row.received_units,
+      reference: row.reference,
+      checkedAt: row.checked_at.toISOString(),
+    };
+  }
+
+  async getTrade(flowId: string): Promise<TradeRecord | null> {
+    const result = await this.pool.query<{
+      id: string;
+      flow_id: string;
+      quote_id: string;
+      order_hash: string;
+      status: TradeRecord["status"];
+      received_units: string | null;
+      reference: string | null;
+      checked_at: Date;
+    }>(
+      "SELECT * FROM trade WHERE flow_id = $1 ORDER BY checked_at DESC LIMIT 1",
+      [flowId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          id: row.id,
+          flowId: row.flow_id,
+          quoteId: row.quote_id,
+          orderHash: row.order_hash,
+          status: row.status,
+          receivedUnits: row.received_units,
+          reference: row.reference,
+          checkedAt: row.checked_at.toISOString(),
+        }
+      : null;
+  }
+
+  async updateTrade(
+    id: string,
+    update: Partial<Pick<TradeRecord, "status" | "receivedUnits" | "reference" | "checkedAt">>,
+  ): Promise<TradeRecord> {
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    let param = 2;
+    if (update.status !== undefined) {
+      fields.push(`status = $${param++}`);
+      values.push(update.status);
+    }
+    if (update.receivedUnits !== undefined) {
+      fields.push(`received_units = $${param++}`);
+      values.push(update.receivedUnits);
+    }
+    if (update.reference !== undefined) {
+      fields.push(`reference = $${param++}`);
+      values.push(update.reference);
+    }
+    if (update.checkedAt !== undefined) {
+      fields.push(`checked_at = $${param++}`);
+      values.push(update.checkedAt);
+    }
+    if (fields.length === 0) {
+      const result = await this.pool.query<{
+        id: string; flow_id: string; quote_id: string; order_hash: string;
+        status: TradeRecord["status"]; received_units: string | null;
+        reference: string | null; checked_at: Date;
+      }>("SELECT * FROM trade WHERE id = $1", [id]);
+      const row = result.rows[0];
+      if (!row) throw new AppError("NOT_FOUND", "Trade not found", 404);
+      return {
+        id: row.id, flowId: row.flow_id, quoteId: row.quote_id,
+        orderHash: row.order_hash, status: row.status,
+        receivedUnits: row.received_units, reference: row.reference,
+        checkedAt: row.checked_at.toISOString(),
+      };
+    }
+    const result = await this.pool.query<{
+      id: string; flow_id: string; quote_id: string; order_hash: string;
+      status: TradeRecord["status"]; received_units: string | null;
+      reference: string | null; checked_at: Date;
+    }>(
+      `UPDATE trade SET ${fields.join(", ")} WHERE id = $1 RETURNING *`,
+      values,
+    );
+    const row = result.rows[0];
+    if (!row) throw new AppError("NOT_FOUND", "Trade not found", 404);
+    return {
+      id: row.id, flowId: row.flow_id, quoteId: row.quote_id,
+      orderHash: row.order_hash, status: row.status,
+      receivedUnits: row.received_units, reference: row.reference,
+      checkedAt: row.checked_at.toISOString(),
+    };
   }
 
   async saveChallenge(

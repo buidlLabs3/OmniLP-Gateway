@@ -8,7 +8,7 @@ const wallet = process.env.TON_WALLET;
 const amount = process.env.USDT_AMOUNT ?? "10";
 const timeoutMs = Number(process.env.STON_TIMEOUT_MS ?? "15000");
 const retryCount = Number(process.env.STON_RETRIES ?? "2");
-const MAX_BODY_BYTES = 10_000_000;
+const MAX_BODY_BYTES = 64_000_000;
 const usdt = TON_USDT;
 
 function units(value, decimals) {
@@ -398,7 +398,7 @@ async function main() {
     !usdtAsset ||
     usdtAsset.blacklisted !== false ||
     usdtAsset.deprecated !== false ||
-    usdtAsset.symbol !== "USDT" ||
+    !["USDT", "USD₮"].includes(usdtAsset.symbol) ||
     usdtAsset.decimals !== 6
   ) {
     throw new Error("Canonical TON USDT metadata is missing or unsafe");
@@ -416,6 +416,7 @@ async function main() {
       address: usdt,
       symbol: assets.get(usdt)?.symbol ?? "unknown",
       decimals: assets.get(usdt)?.decimals ?? null,
+      tags: assets.get(usdt)?.tags ?? null,
     },
     pools: pools.map((pool) => poolSummary(pool, assets, routers)),
     simulations: [],

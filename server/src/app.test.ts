@@ -81,20 +81,24 @@ function quote(flow: Flow): Quote {
   };
 }
 
-function plan(flow: Flow): DepositPlan {
+function plan(
+  flow: Flow,
+  inputUnits = flow.sourceUnits,
+  indicative = false,
+): DepositPlan {
   return {
     id: randomUUID(),
     flowId: flow.id,
     poolId: pool.id,
     mode: "single",
-    inputUnits: flow.sourceUnits,
-    token0Units: flow.sourceUnits,
+    inputUnits,
+    token0Units: inputUnits,
     token1Units: "0",
     minLpUnits: "9000000",
     lpUnitsBefore: "0",
     gasUnits: "300000000",
     priceImpactPips: 1000,
-    indicative: false,
+    indicative,
     routerAddress: pool.routerAddress,
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   };
@@ -116,7 +120,12 @@ async function setup() {
   };
   const ston = {
     getPools: async () => [pool],
-    getPlan: async (flow: Flow) => plan(flow),
+    getPlan: async (
+      flow: Flow,
+      _pool: Pool,
+      inputUnits: string,
+      indicative: boolean,
+    ) => plan(flow, inputUnits, indicative),
   };
   const auth = {
     verifySession: () => undefined,
@@ -145,9 +154,18 @@ async function setup() {
 async function setupWithConfig(value: Config) {
   const store = new MemoryStore();
   await store.savePools([pool]);
+  const omni = {
+    getQuote: async (flow: Flow) => ({
+      quote: quote(flow),
+      hash: "a".repeat(64),
+    }),
+    registerOrder: async () => ({ tradeId: "trade-test-001", rfqId: "quote-1" }),
+    trackTrade: async () => ({ status: "registered", receivedUnits: null }),
+  };
   const app = await buildApp({
     config: value,
     store,
+    omni: omni as never,
     auth: { verifySession: () => undefined } as never,
     telegram: { verifySession: () => undefined } as never,
   });
@@ -285,6 +303,156 @@ describe("flow API", () => {
     expect(removed.statusCode).toBe(404);
   });
 
+  it("returns the saved quote and indicative plan with the flow detail", async () => {
+    const { app } = await setup();
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/flows",
+      headers: { "idempotency-key": "flow-request-0101" },
+      payload: flowBody,
+    });
+    const id = created.json().flow.id as string;
+    const quoted = await app.inject({
+      method: "POST",
+      url: `/v1/flows/${id}/quote`,
+      headers: {
+        authorization: "Bearer test",
+        "idempotency-key": "quote-request-0101",
+      },
+    });
+    expect(quoted.statusCode).toBe(200);
+    expect(quoted.json().quote.outputUnits).toBe("9900000");
+    expect(quoted.json().plan.indicative).toBe(true);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/v1/flows/${id}`,
+      headers: { authorization: "Bearer test" },
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().quote.id).toBe("quote-1");
+    expect(detail.json().plan).not.toBeNull();
+    expect(detail.json().events.length).toBeGreaterThanOrEqual(2);
+
+    const status = await app.inject({
+      method: "GET",
+      url: `/v1/flows/${id}/status`,
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json().quote.id).toBe("quote-1");
+  });
+
+  it("marks the deposit plan changed beyond the threshold and requires acceptance", async () => {
+    const store = new MemoryStore();
+    await store.savePools([pool]);
+    const omni = {
+      getQuote: async (flow: Flow) => ({
+        quote: quote(flow),
+        hash: "a".repeat(64),
+      }),
+    };
+    const ston = {
+      getPools: async () => [pool],
+      getPlan: async (
+        flow: Flow,
+        _pool: Pool,
+        inputUnits: string,
+        indicative: boolean,
+      ) => {
+        const value = plan(flow, inputUnits, indicative);
+        return indicative ? value : { ...value, minLpUnits: "4500000" };
+      },
+    };
+    const app = await buildApp({
+      config,
+      store,
+      omni: omni as never,
+      ston: ston as never,
+      auth: { verifySession: () => undefined } as never,
+      telegram: { verifySession: () => undefined } as never,
+    });
+    apps.push(app);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/v1/flows",
+      headers: { "idempotency-key": "flow-request-0201" },
+      payload: flowBody,
+    });
+    const id = created.json().flow.id as string;
+    await app.inject({
+      method: "POST",
+      url: `/v1/flows/${id}/quote`,
+      headers: {
+        authorization: "Bearer test",
+        "idempotency-key": "quote-request-0201",
+      },
+    });
+    const flow = await store.getFlow(id);
+    expect(flow).not.toBeNull();
+    const quoted = flow as Flow;
+    expect(quoted.state).toBe("quoted");
+    const source = await store.setState(
+      quoted.id,
+      "source_pending",
+      "source:test",
+      quoted.version,
+    );
+    const pending = await store.setState(
+      source.id,
+      "trade_pending",
+      "trade:test",
+      source.version,
+    );
+    const filled = await store.setState(
+      pending.id,
+      "trade_filled",
+      "filled:test",
+      pending.version,
+    );
+    const received = await store.setState(
+      filled.id,
+      "funds_received",
+      "trade:verified",
+      filled.version,
+    );
+    expect(received.state).toBe("funds_received");
+
+    const preview = await app.inject({
+      method: "POST",
+      url: `/v1/flows/${id}/deposit-plan`,
+      headers: {
+        authorization: "Bearer test",
+        "idempotency-key": "deposit-plan-0201",
+      },
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json().flow.state).toBe("deposit_changed");
+    expect(preview.json().changed).toBe(true);
+
+    const blocked = await app.inject({
+      method: "POST",
+      url: `/v1/flows/${id}/deposit-plan`,
+      headers: {
+        authorization: "Bearer test",
+        "idempotency-key": "deposit-plan-0202",
+      },
+    });
+    expect(blocked.statusCode).toBe(409);
+
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/v1/flows/${id}/deposit-plan`,
+      headers: {
+        authorization: "Bearer test",
+        "idempotency-key": "deposit-plan-0203",
+      },
+      payload: { accepted: true },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json().flow.state).toBe("deposit_ready");
+  });
+
   it("keeps value-moving routes disabled by the global kill switch", async () => {
     const { app } = await setup();
     const created = await app.inject({
@@ -310,18 +478,60 @@ describe("flow API", () => {
     });
     const flow = await store.createFlow(flowBody);
     await store.setState(flow.id, "quoted", "quote:test", flow.version);
+    const q = quote(flow);
+    await store.saveQuote(q, "a".repeat(64));
     const response = await app.inject({
       method: "POST",
       url: `/v1/flows/${flow.id}/source`,
-      headers: { authorization: "Bearer test" },
+      headers: {
+        authorization: "Bearer test",
+        "idempotency-key": "source-test-0001",
+      },
       payload: {
-        hash: `0x${"1".repeat(64)}`,
-        attempt: 1,
-        version: 1,
+        signature: "0x1234",
+        baseTxHash: `0x${"1".repeat(64)}`,
       },
     });
-    expect(response.statusCode).toBe(503);
-    expect(response.json().error.code).toBe("ROUTE_UNAVAILABLE");
+    expect(response.statusCode).toBe(200);
+    expect(response.json().tradeId).toBeDefined();
+  });
+
+  it("returns trade status for a flow with an active trade", async () => {
+    const { app, store } = await setupWithConfig({
+      ...config,
+      READ_ONLY: true,
+    });
+    const flow = await store.createFlow(flowBody);
+    const quoted = await store.setState(flow.id, "quoted", "q", flow.version);
+    const pending = await store.setState(quoted.id, "source_pending", "s", quoted.version);
+    await store.setState(pending.id, "trade_pending", "t", pending.version);
+    await store.saveTrade({
+      flowId: flow.id,
+      quoteId: "quote-1",
+      orderHash: "trade-001",
+      status: "registered",
+      receivedUnits: null,
+      reference: null,
+      checkedAt: new Date().toISOString(),
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/flows/${flow.id}/trade`,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().trade.status).toBe("registered");
+    expect(response.json().trade.orderHash).toBe("trade-001");
+  });
+
+  it("returns null trade for a flow with no trade", async () => {
+    const { app, store } = await setup();
+    const flow = await store.createFlow(flowBody);
+    const response = await app.inject({
+      method: "GET",
+      url: `/v1/flows/${flow.id}/trade`,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().trade).toBeNull();
   });
 });
 

@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS trade (
   id uuid PRIMARY KEY,
   flow_id uuid NOT NULL REFERENCES flow(id),
   quote_id uuid NOT NULL REFERENCES quote(id),
+  order_hash text NOT NULL,
   status text NOT NULL,
   received_units numeric(78, 0),
   reference text,

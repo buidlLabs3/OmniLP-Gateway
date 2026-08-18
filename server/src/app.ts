@@ -5,11 +5,14 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import {
   AppError,
+  changePips,
   createFlowSchema,
+  evmHashSchema,
   getNextActions,
   isExpired,
   tonHashSchema,
   transactionReferenceSchema,
+  type DepositPlan,
 } from "@omnilp/shared";
 import Fastify, { type FastifyInstance } from "fastify";
 import { z, ZodError } from "zod";
@@ -182,18 +185,24 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     auth.verifySession(id, request.headers.authorization);
     const flow = await store.getFlow(id);
     if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
-    const [events, transactions] = await Promise.all([
+    const [events, transactions, quote, plan] = await Promise.all([
       store.listEvents(id),
       store.listTransactions(id),
+      store.getQuote(id),
+      store.getPlan(id),
     ]);
-    return { flow: safeFlow(flow), events, transactions };
+    return { flow: safeFlow(flow), events, transactions, quote, plan };
   });
 
   app.get("/v1/flows/:id/status", async (request) => {
     const { id } = idSchema.parse(request.params);
     const flow = await store.getFlow(id);
     if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
-    return { flow: safeFlow(flow) };
+    const [quote, plan] = await Promise.all([
+      store.getQuote(id),
+      store.getPlan(id),
+    ]);
+    return { flow: safeFlow(flow), quote, plan };
   });
 
   app.post("/v1/flows/:id/auth/challenge", async (request) => {
@@ -248,13 +257,29 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         }
         const { quote, hash } = await omni.getQuote(flow, "entry");
         await store.saveQuote(quote, hash);
+        const pool = await store.getPool(flow.poolId);
+        let plan: DepositPlan | null = null;
+        if (pool) {
+          try {
+            const value = await ston.getPlan(
+              flow,
+              pool,
+              flow.sourceUnits,
+              true,
+            );
+            await store.savePlan(value);
+            plan = value;
+          } catch {
+            plan = null;
+          }
+        }
         const updated = await store.setState(
           flow.id,
           "quoted",
           `quote:${quote.id}`,
           flow.version,
         );
-        return { flow: safeFlow(updated), quote };
+        return { flow: safeFlow(updated), quote, plan };
       },
     );
     return result.value;
@@ -299,11 +324,15 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   app.post("/v1/flows/:id/deposit-plan", async (request) => {
     const { id } = idSchema.parse(request.params);
     auth.verifySession(id, request.headers.authorization);
+    const body = z
+      .object({ accepted: z.boolean().optional() })
+      .strict()
+      .parse(request.body ?? {});
     const result = await idempotent(
       store,
-      `deposit-plan:${id}`,
+      `deposit-plan:${id}:${body.accepted ? "accepted" : "preview"}`,
       request.headers["idempotency-key"] as string | undefined,
-      { flowId: id },
+      { flowId: id, accepted: body.accepted ?? false },
       async () => {
         const flow = await store.getFlow(id);
         if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
@@ -318,53 +347,128 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
             409,
           );
         }
+        if (flow.state === "deposit_changed" && !body.accepted) {
+          throw new AppError(
+            "PLAN_CHANGED",
+            "Review the changed plan and accept it before continuing",
+            409,
+          );
+        }
         const pool = await store.getPool(flow.poolId);
         if (!pool) throw new AppError("NOT_FOUND", "Pool not found", 404);
-        const plan = await ston.getPlan(flow, pool, flow.sourceUnits, false);
+        const indicative = await store.getPlan(id);
+        const receivedUnits = await store.getReceivedUnits(id);
+        const inputUnits = receivedUnits ?? flow.sourceUnits;
+        const plan = await ston.getPlan(flow, pool, inputUnits, false);
         await store.savePlan(plan);
+        const changed =
+          indicative &&
+          (changePips(indicative.inputUnits, plan.inputUnits) >
+            config.PLAN_CHANGE_PIPS ||
+            changePips(indicative.minLpUnits, plan.minLpUnits) >
+              config.PLAN_CHANGE_PIPS);
+        const next =
+          changed && flow.state !== "deposit_changed"
+            ? "deposit_changed"
+            : "deposit_ready";
         const updated = await store.setState(
           flow.id,
-          "deposit_ready",
+          next,
           `plan:${plan.id}`,
           flow.version,
         );
-        return { flow: safeFlow(updated), plan };
+        return {
+          flow: safeFlow(updated),
+          plan,
+          changed: Boolean(changed),
+        };
+      },
+    );
+    return result.value;
+  });
+
+  app.post("/v1/flows/:id/source", async (request) => {
+    if (config.READ_ONLY) {
+      throw new AppError("READ_ONLY", "Value-moving routes are disabled", 503);
+    }
+    const { id } = idSchema.parse(request.params);
+    auth.verifySession(id, request.headers.authorization);
+    const body = z.object({
+      signature: z.string().min(1),
+      baseTxHash: evmHashSchema,
+    }).parse(request.body);
+    const result = await idempotent(
+      store,
+      `source:${id}`,
+      request.headers["idempotency-key"] as string | undefined,
+      body,
+      async () => {
+        const flow = await store.getFlow(id);
+        if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
+        if (!["quoted"].includes(flow.state)) {
+          throw new AppError("CONFLICT", "Flow is not ready for source execution", 409);
+        }
+        const quote = await store.getQuote(id);
+        if (!quote || isExpired(quote.expiresAt)) {
+          throw new AppError("QUOTE_EXPIRED", "Quote has expired", 409);
+        }
+        const { tradeId } = await omni.registerOrder(flow, quote, body.signature);
+        await store.saveTrade({
+          flowId: id,
+          quoteId: quote.id,
+          orderHash: tradeId,
+          status: "registered",
+          receivedUnits: null,
+          reference: null,
+          checkedAt: new Date().toISOString(),
+        });
+        const updated = await store.setState(id, "source_pending", `order:${tradeId}`, flow.version);
+        const hash = evmHashSchema.parse(body.baseTxHash);
+        const txResult = await store.saveTransaction({
+          flowId: id,
+          kind: "source",
+          chain: "base",
+          hash,
+          status: "pending",
+          attempt: 1,
+          confirmedAt: null,
+        });
+        await store.addJob(
+          `track-trade:${id}`,
+          "track_trade",
+          { flowId: id, tradeId },
+          new Date().toISOString(),
+        );
+        await store.addJob(
+          `quote-expiry:${id}`,
+          "quote_expiry",
+          { flowId: id },
+          quote.expiresAt,
+        );
+        return { flow: safeFlow(updated), tradeId, transaction: txResult };
       },
     );
     return result.value;
   });
 
   for (const path of [
-    "/v1/flows/:id/source",
     "/v1/flows/:id/deposit",
     "/v1/flows/:id/withdraw",
-    "/v1/flows/:id/exit",
   ]) {
     app.post(path, async (request) => {
       if (config.READ_ONLY) {
-        throw new AppError(
-          "READ_ONLY",
-          "Value-moving routes are disabled",
-          503,
-        );
+        throw new AppError("READ_ONLY", "Value-moving routes are disabled", 503);
       }
       const { id } = idSchema.parse(request.params);
       auth.verifySession(id, request.headers.authorization);
       const input = transactionReferenceSchema.parse(request.body);
-      const kind = transactionKind(request.routeOptions.url ?? path);
-      if (kind === "source" || kind === "exit") {
-        throw new AppError(
-          "ROUTE_UNAVAILABLE",
-          "Omniston order execution is not enabled",
-          503,
-        );
-      }
+      const kind = transactionKind(request.routeOptions.url ?? path) as "deposit" | "withdraw";
       const chain = "ton" as const;
       const hash = tonHashSchema.parse(input.hash);
       const expected = {
-        deposit: { state: "deposit_ready", next: "deposit_pending" },
-        withdraw: { state: "withdraw_ready", next: "withdraw_pending" },
-      } as const;
+        deposit: { state: "deposit_ready" as const, next: "deposit_pending" as const },
+        withdraw: { state: "withdraw_ready" as const, next: "withdraw_pending" as const },
+      };
       const rule = expected[kind];
       const result = await idempotent(
         store,
@@ -375,20 +479,12 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
           const flow = await store.getFlow(id);
           if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
           if (flow.state !== rule.state) {
-            throw new AppError(
-              "CONFLICT",
-              `${kind} reference is not allowed in this flow state`,
-              409,
-            );
+            throw new AppError("CONFLICT", `${kind} reference is not allowed in this flow state`, 409);
           }
           if (kind === "deposit") {
             const plan = await store.getPlan(id);
             if (!plan || isExpired(plan.expiresAt)) {
-              throw new AppError(
-                "PLAN_CHANGED",
-                "A current deposit plan is required",
-                409,
-              );
+              throw new AppError("PLAN_CHANGED", "A current deposit plan is required", 409);
             }
           }
           return store.submitTransaction(
@@ -413,6 +509,104 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       };
     });
   }
+
+  app.post("/v1/flows/:id/withdraw-source", async (request) => {
+    if (config.READ_ONLY) {
+      throw new AppError("READ_ONLY", "Value-moving routes are disabled", 503);
+    }
+    const { id } = idSchema.parse(request.params);
+    auth.verifySession(id, request.headers.authorization);
+    const input = z.object({
+      hash: tonHashSchema,
+      attempt: z.number().int().min(1),
+      version: z.number().int().min(0),
+    }).parse(request.body);
+    const result = await idempotent(
+      store,
+      `withdraw-source:${id}`,
+      request.headers["idempotency-key"] as string | undefined,
+      input,
+      async () => {
+        const flow = await store.getFlow(id);
+        if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
+        if (flow.state !== "source_withdrawal_available") {
+          throw new AppError("CONFLICT", "Source withdrawal is not available", 409);
+        }
+        return store.submitTransaction(
+          {
+            flowId: id,
+            kind: "exit",
+            chain: "base",
+            hash: input.hash,
+            status: "pending",
+            attempt: input.attempt,
+            confirmedAt: null,
+          },
+          "source_withdrawn",
+          input.version,
+        );
+      },
+    );
+    return {
+      flow: safeFlow(result.value.flow),
+      transaction: result.value.transaction,
+      message: "Source withdrawal submitted for verification",
+    };
+  });
+
+  app.get("/v1/flows/:id/trade", async (request) => {
+    const { id } = idSchema.parse(request.params);
+    const flow = await store.getFlow(id);
+    if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
+    const trade = await store.getTrade(id);
+    return { trade };
+  });
+
+  app.post("/v1/flows/:id/exit", async (request) => {
+    if (config.READ_ONLY) {
+      throw new AppError("READ_ONLY", "Value-moving routes are disabled", 503);
+    }
+    const { id } = idSchema.parse(request.params);
+    auth.verifySession(id, request.headers.authorization);
+    const input = transactionReferenceSchema.parse(request.body);
+    const chain = "base" as const;
+    const hash = tonHashSchema.parse(input.hash);
+    const result = await idempotent(
+      store,
+      `exit:${id}`,
+      request.headers["idempotency-key"] as string | undefined,
+      { ...input, hash },
+      async () => {
+        const flow = await store.getFlow(id);
+        if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
+        if (flow.state !== "exit_pending") {
+          throw new AppError("CONFLICT", "Exit is not ready", 409);
+        }
+        const quote = await store.getQuote(id);
+        if (!quote || isExpired(quote.expiresAt)) {
+          throw new AppError("QUOTE_EXPIRED", "Exit quote has expired", 409);
+        }
+        return store.submitTransaction(
+          {
+            flowId: id,
+            kind: "exit",
+            chain,
+            hash,
+            status: "pending",
+            attempt: input.attempt,
+            confirmedAt: null,
+          },
+          "exit_complete",
+          input.version,
+        );
+      },
+    );
+    return {
+      flow: safeFlow(result.value.flow),
+      transaction: result.value.transaction,
+      message: "Exit transaction submitted for verification",
+    };
+  });
 
   app.get("/v1/positions", async (request) => {
     const query = z.object({ flowId: z.string().uuid() }).parse(request.query);

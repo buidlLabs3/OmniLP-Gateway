@@ -32,6 +32,7 @@ interface QuoteMessage {
   protocol_fee_units?: string;
   quoteTimestamp?: number | string;
   quote_timestamp?: number | string;
+  order?: unknown;
   settlementData?: unknown;
   settlement_data?: unknown;
 }
@@ -155,6 +156,15 @@ function integer(item: unknown, name: string, allowZero = false): bigint {
 }
 
 function orderFrom(message: QuoteMessage): Record<string, unknown> {
+  const direct = message.order;
+  if (
+    direct &&
+    typeof direct === "object" &&
+    !Array.isArray(direct) &&
+    Object.keys(direct).length > 0
+  ) {
+    return direct as Record<string, unknown>;
+  }
   const settlement = value(message, "settlement_data", "settlementData");
   if (
     !settlement ||
@@ -304,6 +314,15 @@ function quoteFrom(
   };
 }
 
+export interface OrderData {
+  typedData: Record<string, unknown>;
+  orderExtension: string;
+  owner: string;
+  recipient: string;
+  inputUnits: string;
+  expiresAt: string;
+}
+
 export class OmniService {
   constructor(private readonly config: Config) {}
 
@@ -324,6 +343,194 @@ export class OmniService {
       .update(JSON.stringify(quote))
       .digest("hex");
     return { quote, hash };
+  }
+
+  buildOrderData(
+    flow: Flow,
+    quote: Quote,
+  ): OrderData {
+    const owner = flow.baseWallet;
+    const recipient = flow.tonWallet;
+    const sourceAssets = asset(quote.direction);
+    const deadline = Math.floor(Date.parse(quote.expiresAt) / 1_000);
+    const nonce = BigInt(quote.id) & ((1n << 96n) - 1n);
+    const typedData = {
+      types: {
+        EIP712Domain: [
+          { name: "name", type: "string" },
+          { name: "version", type: "string" },
+          { name: "chainId", type: "uint256" },
+          { name: "verifyingContract", type: "address" },
+        ],
+        Order: [
+          { name: "owner_src_address", type: "address" },
+          { name: "trader_dst_address", type: "string" },
+          { name: "input_asset", type: "bytes" },
+          { name: "output_asset", type: "bytes" },
+          { name: "input_amount", type: "uint256" },
+          { name: "min_output_amount", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+          { name: "nonce", type: "uint96" },
+          { name: "fee", type: "uint256" },
+          { name: "src_protocol_address", type: "address" },
+          { name: "dst_protocol_address", type: "address" },
+          { name: "resolver_id", type: "string" },
+        ],
+      },
+      primaryType: "Order",
+      domain: {
+        name: "OmnistonCrosschainOrder",
+        version: "1",
+        chainId: 8453,
+        verifyingContract: quote.sourceProtocolAddress,
+      },
+      message: {
+        owner_src_address: owner,
+        trader_dst_address: recipient,
+        input_asset: JSON.stringify(sourceAssets.input),
+        output_asset: JSON.stringify(sourceAssets.output),
+        input_amount: quote.inputUnits,
+        min_output_amount: quote.outputUnits,
+        deadline,
+        nonce: nonce.toString(),
+        fee: (BigInt(quote.protocolFeeUnits) + BigInt(quote.integratorFeeUnits)).toString(),
+        src_protocol_address: quote.sourceProtocolAddress,
+        dst_protocol_address: quote.destinationProtocolAddress,
+        resolver_id: quote.resolverId,
+      },
+    };
+    const orderExtension = JSON.stringify({
+      owner_src_address: owner,
+      trader_dst_address: recipient,
+      input_asset: sourceAssets.input,
+      output_asset: sourceAssets.output,
+      input_amount: quote.inputUnits,
+      min_output_amount: quote.outputUnits,
+      deadline,
+      nonce: nonce.toString(),
+      fee: (BigInt(quote.protocolFeeUnits) + BigInt(quote.integratorFeeUnits)).toString(),
+      src_protocol_contract_address: quote.sourceProtocolAddress,
+      dst_protocol_contract_address: quote.destinationProtocolAddress,
+      resolver_id: quote.resolverId,
+    });
+    return {
+      typedData,
+      orderExtension,
+      owner,
+      recipient,
+      inputUnits: quote.inputUnits,
+      expiresAt: quote.expiresAt,
+    };
+  }
+
+  async registerOrder(
+    flow: Flow,
+    quote: Quote,
+    signature: string,
+  ): Promise<{ tradeId: string; rfqId: string }> {
+    const orderData = this.buildOrderData(flow, quote);
+    const order = JSON.parse(orderData.orderExtension) as Record<string, unknown>;
+    const params = {
+      order,
+      signature,
+      ownerSrcAddress: flow.baseWallet,
+      traderDstAddress: flow.tonWallet,
+      inputAsset: asset(quote.direction).input,
+      outputAsset: asset(quote.direction).output,
+    };
+    const response = await this.rpcOnce(
+      "stonfi.omni.v1beta8.OrderRpc.Register",
+      params,
+    );
+    const result = response.result ?? response;
+    const data = result as Record<string, unknown> | undefined;
+    const tradeId =
+      (typeof data?.tradeId === "string" ? data.tradeId : undefined) ??
+      (typeof data?.trade_id === "string" ? data.trade_id : undefined) ??
+      (typeof data?.id === "string" ? data.id : undefined) ??
+      "";
+    if (!tradeId) {
+      throw new AppError("UPSTREAM_FAILED", "Order registration returned no trade ID", 502);
+    }
+    return { tradeId, rfqId: quote.id };
+  }
+
+  async trackTrade(
+    tradeId: string,
+  ): Promise<{ status: string; receivedUnits: string | null }> {
+    const response = await this.rpcOnce(
+      "stonfi.omni.v1beta8.TradeRpc.Status",
+      { tradeId },
+    );
+    const result = response.result ?? response;
+    if (!result || typeof result !== "object") {
+      throw new AppError("UPSTREAM_FAILED", "Trade status returned invalid data", 502);
+    }
+    const status =
+      (result as Record<string, unknown>).status ??
+      (result as Record<string, unknown>).trade_status ??
+      "";
+    const receivedUnits =
+      (result as Record<string, unknown>).received_units ??
+      (result as Record<string, unknown>).receivedUnits ??
+      null;
+    return {
+      status: String(status),
+      receivedUnits: typeof receivedUnits === "string" ? receivedUnits : null,
+    };
+  }
+
+  private rpcOnce(
+    method: string,
+    params: unknown,
+  ): Promise<RpcMessage> {
+    const WebSocketClass = globalThis.WebSocket;
+    if (!WebSocketClass)
+      throw new AppError("INTERNAL_ERROR", "WebSocket support is unavailable", 500);
+    const url = new URL(this.config.OMNISTON_WS_URL);
+    if (url.protocol !== "wss:" || url.username || url.password || url.search || url.hash) {
+      throw new AppError("BAD_REQUEST", "Omniston URL is unsafe");
+    }
+    return new Promise((resolve, reject) => {
+      const id = randomUUID();
+      const socket = new WebSocketClass(url);
+      let complete = false;
+      const finish = (error?: Error, result?: RpcMessage) => {
+        if (complete) return;
+        complete = true;
+        clearTimeout(timer);
+        socket.close();
+        if (error) reject(error);
+        else if (result) resolve(result);
+      };
+      const timer = setTimeout(
+        () => finish(new AppError("UPSTREAM_FAILED", "Omniston RPC timed out", 502, true)),
+        this.config.UPSTREAM_TIMEOUT_MS,
+      );
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+      });
+      socket.addEventListener("message", (input) => {
+        try {
+          const message = JSON.parse(String(input.data)) as RpcMessage;
+          if (!message || typeof message !== "object" || Array.isArray(message)) return;
+          if (message.id !== undefined && message.id !== id) return;
+          if (message.error) {
+            finish(new AppError("UPSTREAM_FAILED", message.error.message ?? "Omniston rejected the request", 502));
+            return;
+          }
+          if (message.id === id) finish(undefined, message);
+        } catch (error) {
+          finish(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+      socket.addEventListener("error", () => {
+        finish(new AppError("UPSTREAM_FAILED", "Could not connect to Omniston", 502, true));
+      });
+      socket.addEventListener("close", () => {
+        finish(new AppError("UPSTREAM_FAILED", "Omniston closed before responding", 502, true));
+      });
+    });
   }
 
   private quoteOnce(
@@ -379,7 +586,7 @@ export class OmniService {
           JSON.stringify({
             jsonrpc: "2.0",
             id,
-            method: "v1beta8.quote",
+            method: "stonfi.omni.v1beta8.QuoteRpc.Quote",
             params,
           }),
         );

@@ -34,7 +34,7 @@ const poolResponseSchema = z.object({
       token0_address: z.string(),
       token1_address: z.string(),
       lp_total_supply_usd: z.string().nullable(),
-      volume_24h_usd: z.string().nullable(),
+      volume_24h_usd: z.string().nullable().default(null), // live API omits the key on most pools
       deprecated: z.boolean(),
       lp_fee: z.string().optional(),
     }),
@@ -68,7 +68,7 @@ const simulationSchema = z.object({
 const positionSchema = z.object({
   pool: z.object({
     address: z.string(),
-    lp_balance: z.string().regex(/^\d+$/).nullable(),
+    lp_balance: z.string().regex(/^\d+$/).nullable().default(null),
   }),
 });
 
@@ -201,7 +201,8 @@ export class StonService {
           !token1.deprecated &&
           router &&
           router.major_version >= 2 &&
-          usdt?.symbol === "USDT" &&
+          usdt &&
+          ["USDT", "USD₮"].includes(usdt.symbol) &&
           usdt.decimals === 6 &&
           feePips !== null &&
           approved.has(tonAddressKey(pool.address) ?? ""),
