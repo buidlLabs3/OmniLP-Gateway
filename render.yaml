@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: omnilp-gateway-api
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @omnilp/shared build
+    startCommand: pnpm --filter @omnilp/server start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DATABASE_URL
+        fromDatabase:
+          name: omnilp-db
+          property: connectionString
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_SECRET
+        generateValue: true
+      - key: OMNISTON_WS
+        value: wss://api.omniston.store/v1beta8
+      - key: STON_API_BASE
+        value: https://ston-api.ston.fi/v1
+      - key: STON_ROUTER
+        value: EQB3ncyBUTjZKH0OcrGTZzQMChMiQuQIlDaKpGy3KZs5NIph
+      - key: STON_METADATA
+        value: EQAO4h5r1WsmP3OjA7WYrMNMunUkUHQMLWo-5dLJv16Qw0do
+      - key: BASE_RPC_URL
+        sync: false
+      - key: TONCENTER_URL
+        value: https://toncenter.com/api/v2
+      - key: BASECHAIN
+        value: "8453"
+      - key: READ_ONLY
+        value: "false"
+      - key: RATE_LIMIT_RPM
+        value: "60"
+    healthCheckPath: /health
+
+databases:
+  - name: omnilp-db
+    plan: free
+    databaseName: omnilp
+    user: omnilp
