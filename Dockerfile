@@ -27,9 +27,10 @@ COPY --from=builder --chown=appuser:nodejs /app/shared/dist ./shared/dist
 COPY --from=builder --chown=appuser:nodejs /app/shared/package.json ./shared/
 COPY --from=builder --chown=appuser:nodejs /app/server/dist ./server/dist
 COPY --from=builder --chown=appuser:nodejs /app/server/package.json ./server/
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/shared/node_modules ./shared/node_modules
-COPY --from=deps /app/server/node_modules ./server/node_modules
+COPY --from=deps --chown=appuser:nodejs /app/node_modules ./node_modules
+COPY --from=deps --chown=appuser:nodejs /app/shared/node_modules ./shared/node_modules
+COPY --from=deps --chown=appuser:nodejs /app/server/node_modules ./server/node_modules
+COPY --chown=appuser:nodejs db/ ./db/
 USER appuser
 EXPOSE 3001
-CMD ["node", "server/dist/index.js"]
+CMD ["sh", "-c", "node server/dist/migrate.js && node server/dist/index.js"]
