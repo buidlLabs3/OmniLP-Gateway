@@ -33,4 +33,4 @@ COPY --from=deps --chown=appuser:nodejs /app/server/node_modules ./server/node_m
 COPY --chown=appuser:nodejs db/ ./db/
 USER appuser
 EXPOSE 3001
-CMD ["sh", "-c", "node server/dist/migrate.js && node server/dist/index.js"]
+CMD ["sh", "-c", "echo 'Running migration...' && node server/dist/migrate.js 2>&1; echo 'Starting server...' && exec node server/dist/index.js 2>&1"]
