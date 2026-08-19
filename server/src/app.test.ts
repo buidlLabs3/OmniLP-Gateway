@@ -159,7 +159,10 @@ async function setupWithConfig(value: Config) {
       quote: quote(flow),
       hash: "a".repeat(64),
     }),
-    registerOrder: async () => ({ tradeId: "trade-test-001", rfqId: "quote-1" }),
+    registerOrder: async () => ({
+      tradeId: "trade-test-001",
+      rfqId: "quote-1",
+    }),
     trackTrade: async () => ({ status: "registered", receivedUnits: null }),
   };
   const app = await buildApp({
@@ -503,7 +506,12 @@ describe("flow API", () => {
     });
     const flow = await store.createFlow(flowBody);
     const quoted = await store.setState(flow.id, "quoted", "q", flow.version);
-    const pending = await store.setState(quoted.id, "source_pending", "s", quoted.version);
+    const pending = await store.setState(
+      quoted.id,
+      "source_pending",
+      "s",
+      quoted.version,
+    );
     await store.setState(pending.id, "trade_pending", "t", pending.version);
     await store.saveTrade({
       flowId: flow.id,

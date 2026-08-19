@@ -34,25 +34,40 @@ import {
 
 import {
   buildDepositPlan,
+  buildWithdrawalPlan,
   createFlow,
   getChallenge,
+  getDepositTx,
   getFlow,
   getImpact,
+  getOrderData,
   getPools,
   getTradeStatus,
+  getWithdrawTx,
   proveBase as submitBaseProof,
   proveTon as submitTonProof,
   requestExitQuote,
   requestQuote,
   startTelegramSession,
+  submitDeposit,
+  submitExit,
+  submitSourceOrder,
+  submitWithdraw,
   type FlowDetail,
   type Impact,
   type Pool,
   type TelegramSession,
   type Trade,
 } from "../lib/api";
-import { connectBaseWallet, signBaseMessage } from "../lib/base";
+import {
+  connectBaseWallet,
+  getBaseAddress,
+  sendBaseTransaction,
+  signBaseMessage,
+  signBaseTypedData,
+} from "../lib/base";
 import { getTelegram, startTelegram, tap } from "../lib/telegram";
+import { sendTonTransaction } from "../lib/tonTx";
 
 const demoBase = "0x1111111111111111111111111111111111111111";
 const demoTon = `0:${"9".repeat(64)}`;
@@ -180,9 +195,15 @@ const actionLabels: Record<string, string> = {
 
 const executableActions = new Set([
   "request_quote",
+  "review_source",
   "build_deposit_plan",
   "review_deposit",
+  "submit_deposit",
+  "start_exit",
+  "build_withdrawal",
+  "submit_withdrawal",
   "request_exit_quote",
+  "review_exit",
 ]);
 
 export default function Home() {
@@ -388,6 +409,28 @@ export default function Home() {
       if (action === "request_quote") {
         const next = await requestQuote(flow.flow.id);
         setFlow(next);
+      } else if (action === "review_source") {
+        const orderData = await getOrderData(flow.flow.id);
+        const typedData = orderData.typedData as {
+          types: Record<string, unknown[]>;
+          domain: Record<string, unknown>;
+          message: Record<string, unknown>;
+          primaryType: string;
+        };
+        const signature = await signBaseTypedData(JSON.stringify(typedData));
+        const txResult = await sendBaseTransaction({
+          to: String(typedData.domain.verifyingContract),
+          value: "0x0",
+          data: String(typedData.message.input_asset),
+        });
+        const result = await submitSourceOrder(
+          flow.flow.id,
+          signature,
+          txResult,
+        );
+        setFlow((current) =>
+          current ? { ...current, flow: result.flow } : current,
+        );
       } else if (action === "build_deposit_plan") {
         const result = await buildDepositPlan(flow.flow.id);
         setFlow((current) =>
@@ -395,9 +438,69 @@ export default function Home() {
             ? { ...current, flow: result.flow, plan: result.plan }
             : current,
         );
+      } else if (action === "submit_deposit") {
+        const preview = await getDepositTx(flow.flow.id);
+        const { hash } = await sendTonTransaction(preview.transaction);
+        const result = await submitDeposit(
+          flow.flow.id,
+          hash,
+          1,
+          flow.flow.version,
+        );
+        setFlow((current) =>
+          current ? { ...current, flow: result.flow } : current,
+        );
+      } else if (action === "start_exit") {
+        const result = await buildWithdrawalPlan(flow.flow.id);
+        setFlow((current) =>
+          current ? { ...current, flow: result.flow } : current,
+        );
+        setFlowId(result.flow.id);
+        localStorage.setItem("omnilp.flow", result.flow.id);
+      } else if (
+        action === "build_withdrawal" ||
+        action === "submit_withdrawal"
+      ) {
+        const preview = await getWithdrawTx(
+          flow.flow.id,
+          flow.flow.sourceUnits,
+        );
+        const { hash } = await sendTonTransaction(preview.transaction);
+        const result = await submitWithdraw(
+          flow.flow.id,
+          hash,
+          1,
+          flow.flow.version,
+        );
+        setFlow((current) =>
+          current ? { ...current, flow: result.flow } : current,
+        );
       } else if (action === "request_exit_quote") {
         const next = await requestExitQuote(flow.flow.id);
         setFlow(next);
+      } else if (action === "review_exit") {
+        const orderData = await getOrderData(flow.flow.id);
+        const typedData = orderData.typedData as {
+          types: Record<string, unknown[]>;
+          domain: Record<string, unknown>;
+          message: Record<string, unknown>;
+          primaryType: string;
+        };
+        const signature = await signBaseTypedData(JSON.stringify(typedData));
+        const txResult = await sendBaseTransaction({
+          to: String(typedData.domain.verifyingContract),
+          value: "0x0",
+          data: String(typedData.message.input_asset),
+        });
+        const result = await submitExit(
+          flow.flow.id,
+          txResult,
+          1,
+          flow.flow.version,
+        );
+        setFlow((current) =>
+          current ? { ...current, flow: result.flow } : current,
+        );
       } else if (action === "refresh_trade") {
         const t = await getTradeStatus(flow.flow.id);
         setTrade(t);
@@ -436,11 +539,16 @@ export default function Home() {
   useEffect(() => {
     if (!flow) return;
     if (
-      ["trade_pending", "trade_partial", "trade_failed", "trade_unknown"].includes(
-        flow.flow.state,
-      )
+      [
+        "trade_pending",
+        "trade_partial",
+        "trade_failed",
+        "trade_unknown",
+      ].includes(flow.flow.state)
     ) {
-      void getTradeStatus(flow.flow.id).then(setTrade).catch(() => {});
+      void getTradeStatus(flow.flow.id)
+        .then(setTrade)
+        .catch(() => {});
     }
   }, [flow]);
 
@@ -811,7 +919,10 @@ export default function Home() {
               </button>
 
               <ol className="timeline">
-                {(flow.flow.type === "exit" ? exitTimeline(flow.flow.state) : entryTimeline(flow.flow.state)).map((item) => (
+                {(flow.flow.type === "exit"
+                  ? exitTimeline(flow.flow.state)
+                  : entryTimeline(flow.flow.state)
+                ).map((item) => (
                   <li key={item.label} className={item.state}>
                     <span>
                       {item.state === "done" ? (
@@ -1010,39 +1121,47 @@ export default function Home() {
                 </section>
               )}
 
-              {["trade_pending", "trade_partial", "trade_failed", "trade_unknown"].includes(
-                flow.flow.state,
-              ) && trade && (
-                <section className="quote-card">
-                  <div className="section-title">
-                    <div>
-                      <span>Omniston</span>
-                      <h3>Trade status</h3>
-                    </div>
-                    <Clock3 size={19} />
-                  </div>
-                  <dl className="detail-list">
-                    <div>
-                      <dt>Status</dt>
-                      <dd>{trade.status}</dd>
-                    </div>
-                    <div>
-                      <dt>Order</dt>
-                      <dd>{short(trade.orderHash)}</dd>
-                    </div>
-                    {trade.receivedUnits && (
+              {[
+                "trade_pending",
+                "trade_partial",
+                "trade_failed",
+                "trade_unknown",
+              ].includes(flow.flow.state) &&
+                trade && (
+                  <section className="quote-card">
+                    <div className="section-title">
                       <div>
-                        <dt>Received</dt>
-                        <dd>{formatAmount(trade.receivedUnits, 6, 2)} USDT</dd>
+                        <span>Omniston</span>
+                        <h3>Trade status</h3>
                       </div>
-                    )}
-                    <div>
-                      <dt>Checked</dt>
-                      <dd>{new Date(trade.checkedAt).toLocaleTimeString()}</dd>
+                      <Clock3 size={19} />
                     </div>
-                  </dl>
-                </section>
-              )}
+                    <dl className="detail-list">
+                      <div>
+                        <dt>Status</dt>
+                        <dd>{trade.status}</dd>
+                      </div>
+                      <div>
+                        <dt>Order</dt>
+                        <dd>{short(trade.orderHash)}</dd>
+                      </div>
+                      {trade.receivedUnits && (
+                        <div>
+                          <dt>Received</dt>
+                          <dd>
+                            {formatAmount(trade.receivedUnits, 6, 2)} USDT
+                          </dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt>Checked</dt>
+                        <dd>
+                          {new Date(trade.checkedAt).toLocaleTimeString()}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+                )}
 
               {flow.flow.state === "deposit_ready" && (
                 <section className="action-card">
@@ -1054,41 +1173,50 @@ export default function Home() {
                     <WalletCards size={19} />
                   </div>
                   <p className="notice hint">
-                    Use TON Connect to send a deposit transaction to the STON.fi router.
+                    Use TON Connect to send a deposit transaction to the STON.fi
+                    router.
                   </p>
                 </section>
               )}
 
-              {flow.flow.type === "exit" && [
-                "exit_quoted",
-                "exit_pending",
-                "exit_complete",
-                "exit_failed",
-              ].includes(flow.flow.state) && flow.quote && (
-                <section className="quote-card">
-                  <div className="section-title">
-                    <div>
-                      <span>Exit</span>
-                      <h3>Exit quote</h3>
+              {flow.flow.type === "exit" &&
+                [
+                  "exit_quoted",
+                  "exit_pending",
+                  "exit_complete",
+                  "exit_failed",
+                ].includes(flow.flow.state) &&
+                flow.quote && (
+                  <section className="quote-card">
+                    <div className="section-title">
+                      <div>
+                        <span>Exit</span>
+                        <h3>Exit quote</h3>
+                      </div>
+                      <WalletCards size={19} />
                     </div>
-                    <WalletCards size={19} />
-                  </div>
-                  <dl className="detail-list">
-                    <div>
-                      <dt>Input</dt>
-                      <dd>{formatAmount(flow.quote.inputUnits, 6, 2)} USDT</dd>
-                    </div>
-                    <div>
-                      <dt>Est. output</dt>
-                      <dd>{formatAmount(flow.quote.outputUnits, 6, 2)} USDC</dd>
-                    </div>
-                    <div>
-                      <dt>Expires</dt>
-                      <dd>{new Date(flow.quote.expiresAt).toLocaleTimeString()}</dd>
-                    </div>
-                  </dl>
-                </section>
-              )}
+                    <dl className="detail-list">
+                      <div>
+                        <dt>Input</dt>
+                        <dd>
+                          {formatAmount(flow.quote.inputUnits, 6, 2)} USDT
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Est. output</dt>
+                        <dd>
+                          {formatAmount(flow.quote.outputUnits, 6, 2)} USDC
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Expires</dt>
+                        <dd>
+                          {new Date(flow.quote.expiresAt).toLocaleTimeString()}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+                )}
 
               {flow.flow.state === "complete" && (
                 <section className="quote-card">

@@ -45,7 +45,12 @@ const pool: Pool = {
   id: "usdt-ston",
   address: rawTon(1),
   routerAddress: rawTon(2),
-  token0: { address: TON_USDT, symbol: "USDT", name: "Tether USD", decimals: 6 },
+  token0: {
+    address: TON_USDT,
+    symbol: "USDT",
+    name: "Tether USD",
+    decimals: 6,
+  },
   token1: { address: rawTon(3), symbol: "STON", name: "STON", decimals: 9 },
   entryMode: "single",
   enabled: true,
@@ -80,8 +85,18 @@ describe("trade tracking", () => {
     await store.savePools([pool]);
     const flow = await store.createFlow(flowBody);
     const quoted = await store.setState(flow.id, "quoted", "q", flow.version);
-    const pending = await store.setState(quoted.id, "source_pending", "s", quoted.version);
-    const tradePending = await store.setState(pending.id, "trade_pending", "t", pending.version);
+    const pending = await store.setState(
+      quoted.id,
+      "source_pending",
+      "s",
+      quoted.version,
+    );
+    const tradePending = await store.setState(
+      pending.id,
+      "trade_pending",
+      "t",
+      pending.version,
+    );
     const q: Quote = {
       id: "quote-1",
       flowId: flow.id,
@@ -106,11 +121,22 @@ describe("trade tracking", () => {
       reference: null,
       checkedAt: new Date().toISOString(),
     });
-    await store.addJob(`track-trade:${flow.id}`, "track_trade", { flowId: flow.id, tradeId: "trade-test-001" }, new Date().toISOString());
+    await store.addJob(
+      `track-trade:${flow.id}`,
+      "track_trade",
+      { flowId: flow.id, tradeId: "trade-test-001" },
+      new Date().toISOString(),
+    );
     const omni = {
-      trackTrade: async () => ({ status: "FULLY_FILLED", receivedUnits: "9900000" }),
+      trackTrade: async () => ({
+        status: "FULLY_FILLED",
+        receivedUnits: "9900000",
+      }),
     };
-    const ston = { verifyLiquidityAction: async () => "confirmed" as const, getPosition: async () => "0" };
+    const ston = {
+      verifyLiquidityAction: async () => "confirmed" as const,
+      getPosition: async () => "0",
+    };
     const jobs = new Jobs(config, store, ston as never, omni as never);
     const count = await jobs.run("test-worker");
     expect(count).toBe(1);
@@ -126,12 +152,22 @@ describe("trade tracking", () => {
     await store.savePools([pool]);
     const flow = await store.createFlow(flowBody);
     const quoted = await store.setState(flow.id, "quoted", "q", flow.version);
-    const pending = await store.setState(quoted.id, "source_pending", "s", quoted.version);
+    const pending = await store.setState(
+      quoted.id,
+      "source_pending",
+      "s",
+      quoted.version,
+    );
     await store.setState(pending.id, "trade_pending", "t", pending.version);
     const q: Quote = {
-      id: "quote-1", flowId: flow.id, direction: "entry", resolverId: "r",
-      inputUnits: flow.sourceUnits, outputUnits: "9900000",
-      protocolFeeUnits: "10000", integratorFeeUnits: "0",
+      id: "quote-1",
+      flowId: flow.id,
+      direction: "entry",
+      resolverId: "r",
+      inputUnits: flow.sourceUnits,
+      outputUnits: "9900000",
+      protocolFeeUnits: "10000",
+      integratorFeeUnits: "0",
       sourceProtocolAddress: "0x1111111111111111111111111111111111111111",
       destinationProtocolAddress: rawTon(4),
       quotedAt: new Date().toISOString(),
@@ -139,15 +175,27 @@ describe("trade tracking", () => {
     };
     await store.saveQuote(q, "a".repeat(64));
     await store.saveTrade({
-      flowId: flow.id, quoteId: "quote-1", orderHash: "trade-001",
-      status: "registered", receivedUnits: null, reference: null,
+      flowId: flow.id,
+      quoteId: "quote-1",
+      orderHash: "trade-001",
+      status: "registered",
+      receivedUnits: null,
+      reference: null,
       checkedAt: new Date().toISOString(),
     });
-    await store.addJob(`track-trade:${flow.id}`, "track_trade", { flowId: flow.id, tradeId: "trade-001" }, new Date().toISOString());
+    await store.addJob(
+      `track-trade:${flow.id}`,
+      "track_trade",
+      { flowId: flow.id, tradeId: "trade-001" },
+      new Date().toISOString(),
+    );
     const omni = {
       trackTrade: async () => ({ status: "CANCELLED", receivedUnits: null }),
     };
-    const ston = { verifyLiquidityAction: async () => "confirmed" as const, getPosition: async () => "0" };
+    const ston = {
+      verifyLiquidityAction: async () => "confirmed" as const,
+      getPosition: async () => "0",
+    };
     const jobs = new Jobs(config, store, ston as never, omni as never);
     await jobs.run("test-worker");
     const updated = await store.getFlow(flow.id);
@@ -159,12 +207,22 @@ describe("trade tracking", () => {
     await store.savePools([pool]);
     const flow = await store.createFlow(flowBody);
     const quoted = await store.setState(flow.id, "quoted", "q", flow.version);
-    const pending = await store.setState(quoted.id, "source_pending", "s", quoted.version);
+    const pending = await store.setState(
+      quoted.id,
+      "source_pending",
+      "s",
+      quoted.version,
+    );
     await store.setState(pending.id, "trade_pending", "t", pending.version);
     const q: Quote = {
-      id: "quote-1", flowId: flow.id, direction: "entry", resolverId: "r",
-      inputUnits: flow.sourceUnits, outputUnits: "9900000",
-      protocolFeeUnits: "10000", integratorFeeUnits: "0",
+      id: "quote-1",
+      flowId: flow.id,
+      direction: "entry",
+      resolverId: "r",
+      inputUnits: flow.sourceUnits,
+      outputUnits: "9900000",
+      protocolFeeUnits: "10000",
+      integratorFeeUnits: "0",
       sourceProtocolAddress: "0x1111111111111111111111111111111111111111",
       destinationProtocolAddress: rawTon(4),
       quotedAt: new Date().toISOString(),
@@ -172,15 +230,29 @@ describe("trade tracking", () => {
     };
     await store.saveQuote(q, "a".repeat(64));
     await store.saveTrade({
-      flowId: flow.id, quoteId: "quote-1", orderHash: "trade-001",
-      status: "filled", receivedUnits: "9900000", reference: null,
+      flowId: flow.id,
+      quoteId: "quote-1",
+      orderHash: "trade-001",
+      status: "filled",
+      receivedUnits: "9900000",
+      reference: null,
       checkedAt: new Date().toISOString(),
     });
-    await store.addJob(`track-trade:${flow.id}`, "track_trade", { flowId: flow.id, tradeId: "trade-001" }, new Date().toISOString());
+    await store.addJob(
+      `track-trade:${flow.id}`,
+      "track_trade",
+      { flowId: flow.id, tradeId: "trade-001" },
+      new Date().toISOString(),
+    );
     const omni = {
-      trackTrade: async () => { throw new Error("should not be called"); },
+      trackTrade: async () => {
+        throw new Error("should not be called");
+      },
     };
-    const ston = { verifyLiquidityAction: async () => "confirmed" as const, getPosition: async () => "0" };
+    const ston = {
+      verifyLiquidityAction: async () => "confirmed" as const,
+      getPosition: async () => "0",
+    };
     const jobs = new Jobs(config, store, ston as never, omni as never);
     const count = await jobs.run("test-worker");
     expect(count).toBe(1);
@@ -196,16 +268,26 @@ describe("quote expiry", () => {
     const flow = await store.createFlow(flowBody);
     await store.setState(flow.id, "quoted", "q", flow.version);
     const q: Quote = {
-      id: "quote-1", flowId: flow.id, direction: "entry", resolverId: "r",
-      inputUnits: flow.sourceUnits, outputUnits: "9900000",
-      protocolFeeUnits: "10000", integratorFeeUnits: "0",
+      id: "quote-1",
+      flowId: flow.id,
+      direction: "entry",
+      resolverId: "r",
+      inputUnits: flow.sourceUnits,
+      outputUnits: "9900000",
+      protocolFeeUnits: "10000",
+      integratorFeeUnits: "0",
       sourceProtocolAddress: "0x1111111111111111111111111111111111111111",
       destinationProtocolAddress: rawTon(4),
       quotedAt: new Date(Date.now() - 120_000).toISOString(),
       expiresAt: new Date(Date.now() - 1_000).toISOString(),
     };
     await store.saveQuote(q, "a".repeat(64));
-    await store.addJob(`quote-expiry:${flow.id}`, "quote_expiry", { flowId: flow.id }, new Date().toISOString());
+    await store.addJob(
+      `quote-expiry:${flow.id}`,
+      "quote_expiry",
+      { flowId: flow.id },
+      new Date().toISOString(),
+    );
     const jobs = new Jobs(config, store);
     await jobs.run("test-worker");
     const updated = await store.getFlow(flow.id);
@@ -218,16 +300,26 @@ describe("quote expiry", () => {
     const flow = await store.createFlow(flowBody);
     await store.setState(flow.id, "quoted", "q", flow.version);
     const q: Quote = {
-      id: "quote-1", flowId: flow.id, direction: "entry", resolverId: "r",
-      inputUnits: flow.sourceUnits, outputUnits: "9900000",
-      protocolFeeUnits: "10000", integratorFeeUnits: "0",
+      id: "quote-1",
+      flowId: flow.id,
+      direction: "entry",
+      resolverId: "r",
+      inputUnits: flow.sourceUnits,
+      outputUnits: "9900000",
+      protocolFeeUnits: "10000",
+      integratorFeeUnits: "0",
       sourceProtocolAddress: "0x1111111111111111111111111111111111111111",
       destinationProtocolAddress: rawTon(4),
       quotedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
     await store.saveQuote(q, "a".repeat(64));
-    await store.addJob(`quote-expiry:${flow.id}`, "quote_expiry", { flowId: flow.id }, new Date().toISOString());
+    await store.addJob(
+      `quote-expiry:${flow.id}`,
+      "quote_expiry",
+      { flowId: flow.id },
+      new Date().toISOString(),
+    );
     const jobs = new Jobs(config, store);
     await jobs.run("test-worker");
     const updated = await store.getFlow(flow.id);

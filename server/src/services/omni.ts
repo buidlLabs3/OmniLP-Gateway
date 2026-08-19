@@ -345,10 +345,7 @@ export class OmniService {
     return { quote, hash };
   }
 
-  buildOrderData(
-    flow: Flow,
-    quote: Quote,
-  ): OrderData {
+  buildOrderData(flow: Flow, quote: Quote): OrderData {
     const owner = flow.baseWallet;
     const recipient = flow.tonWallet;
     const sourceAssets = asset(quote.direction);
@@ -393,7 +390,9 @@ export class OmniService {
         min_output_amount: quote.outputUnits,
         deadline,
         nonce: nonce.toString(),
-        fee: (BigInt(quote.protocolFeeUnits) + BigInt(quote.integratorFeeUnits)).toString(),
+        fee: (
+          BigInt(quote.protocolFeeUnits) + BigInt(quote.integratorFeeUnits)
+        ).toString(),
         src_protocol_address: quote.sourceProtocolAddress,
         dst_protocol_address: quote.destinationProtocolAddress,
         resolver_id: quote.resolverId,
@@ -408,7 +407,9 @@ export class OmniService {
       min_output_amount: quote.outputUnits,
       deadline,
       nonce: nonce.toString(),
-      fee: (BigInt(quote.protocolFeeUnits) + BigInt(quote.integratorFeeUnits)).toString(),
+      fee: (
+        BigInt(quote.protocolFeeUnits) + BigInt(quote.integratorFeeUnits)
+      ).toString(),
       src_protocol_contract_address: quote.sourceProtocolAddress,
       dst_protocol_contract_address: quote.destinationProtocolAddress,
       resolver_id: quote.resolverId,
@@ -429,7 +430,10 @@ export class OmniService {
     signature: string,
   ): Promise<{ tradeId: string; rfqId: string }> {
     const orderData = this.buildOrderData(flow, quote);
-    const order = JSON.parse(orderData.orderExtension) as Record<string, unknown>;
+    const order = JSON.parse(orderData.orderExtension) as Record<
+      string,
+      unknown
+    >;
     const params = {
       order,
       signature,
@@ -450,7 +454,11 @@ export class OmniService {
       (typeof data?.id === "string" ? data.id : undefined) ??
       "";
     if (!tradeId) {
-      throw new AppError("UPSTREAM_FAILED", "Order registration returned no trade ID", 502);
+      throw new AppError(
+        "UPSTREAM_FAILED",
+        "Order registration returned no trade ID",
+        502,
+      );
     }
     return { tradeId, rfqId: quote.id };
   }
@@ -458,13 +466,16 @@ export class OmniService {
   async trackTrade(
     tradeId: string,
   ): Promise<{ status: string; receivedUnits: string | null }> {
-    const response = await this.rpcOnce(
-      "stonfi.omni.v1beta8.TradeRpc.Status",
-      { tradeId },
-    );
+    const response = await this.rpcOnce("stonfi.omni.v1beta8.TradeRpc.Status", {
+      tradeId,
+    });
     const result = response.result ?? response;
     if (!result || typeof result !== "object") {
-      throw new AppError("UPSTREAM_FAILED", "Trade status returned invalid data", 502);
+      throw new AppError(
+        "UPSTREAM_FAILED",
+        "Trade status returned invalid data",
+        502,
+      );
     }
     const status =
       (result as Record<string, unknown>).status ??
@@ -480,15 +491,22 @@ export class OmniService {
     };
   }
 
-  private rpcOnce(
-    method: string,
-    params: unknown,
-  ): Promise<RpcMessage> {
+  private rpcOnce(method: string, params: unknown): Promise<RpcMessage> {
     const WebSocketClass = globalThis.WebSocket;
     if (!WebSocketClass)
-      throw new AppError("INTERNAL_ERROR", "WebSocket support is unavailable", 500);
+      throw new AppError(
+        "INTERNAL_ERROR",
+        "WebSocket support is unavailable",
+        500,
+      );
     const url = new URL(this.config.OMNISTON_WS_URL);
-    if (url.protocol !== "wss:" || url.username || url.password || url.search || url.hash) {
+    if (
+      url.protocol !== "wss:" ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
       throw new AppError("BAD_REQUEST", "Omniston URL is unsafe");
     }
     return new Promise((resolve, reject) => {
@@ -504,7 +522,15 @@ export class OmniService {
         else if (result) resolve(result);
       };
       const timer = setTimeout(
-        () => finish(new AppError("UPSTREAM_FAILED", "Omniston RPC timed out", 502, true)),
+        () =>
+          finish(
+            new AppError(
+              "UPSTREAM_FAILED",
+              "Omniston RPC timed out",
+              502,
+              true,
+            ),
+          ),
         this.config.UPSTREAM_TIMEOUT_MS,
       );
       socket.addEventListener("open", () => {
@@ -513,10 +539,17 @@ export class OmniService {
       socket.addEventListener("message", (input) => {
         try {
           const message = JSON.parse(String(input.data)) as RpcMessage;
-          if (!message || typeof message !== "object" || Array.isArray(message)) return;
+          if (!message || typeof message !== "object" || Array.isArray(message))
+            return;
           if (message.id !== undefined && message.id !== id) return;
           if (message.error) {
-            finish(new AppError("UPSTREAM_FAILED", message.error.message ?? "Omniston rejected the request", 502));
+            finish(
+              new AppError(
+                "UPSTREAM_FAILED",
+                message.error.message ?? "Omniston rejected the request",
+                502,
+              ),
+            );
             return;
           }
           if (message.id === id) finish(undefined, message);
@@ -525,10 +558,24 @@ export class OmniService {
         }
       });
       socket.addEventListener("error", () => {
-        finish(new AppError("UPSTREAM_FAILED", "Could not connect to Omniston", 502, true));
+        finish(
+          new AppError(
+            "UPSTREAM_FAILED",
+            "Could not connect to Omniston",
+            502,
+            true,
+          ),
+        );
       });
       socket.addEventListener("close", () => {
-        finish(new AppError("UPSTREAM_FAILED", "Omniston closed before responding", 502, true));
+        finish(
+          new AppError(
+            "UPSTREAM_FAILED",
+            "Omniston closed before responding",
+            502,
+            true,
+          ),
+        );
       });
     });
   }

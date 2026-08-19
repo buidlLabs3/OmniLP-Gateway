@@ -57,16 +57,18 @@ const planResponseSchema = z.object({
   plan: depositPlanSchema,
   changed: z.boolean().optional(),
 });
-const tradeSchema = z.object({
-  id: z.string(),
-  flowId: z.string(),
-  quoteId: z.string(),
-  orderHash: z.string(),
-  status: z.string(),
-  receivedUnits: z.string().nullable(),
-  reference: z.string().nullable(),
-  checkedAt: z.string(),
-}).nullable();
+const tradeSchema = z
+  .object({
+    id: z.string(),
+    flowId: z.string(),
+    quoteId: z.string(),
+    orderHash: z.string(),
+    status: z.string(),
+    receivedUnits: z.string().nullable(),
+    reference: z.string().nullable(),
+    checkedAt: z.string(),
+  })
+  .nullable();
 
 let telegramToken = "";
 let flowToken = "";
@@ -87,7 +89,10 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
 }
 
 /** Try a request; if backend is unreachable, return null instead of throwing */
-async function requestOrFallback(path: string, init?: RequestInit): Promise<unknown | null> {
+async function requestOrFallback(
+  path: string,
+  init?: RequestInit,
+): Promise<unknown | null> {
   try {
     return await request(path, init);
   } catch {
@@ -154,8 +159,18 @@ const DEMO_POOLS: Pool[] = [
     id: "ston-fi-ton-usdt-usdc",
     address: "EQB3ncyBUTjZKH0OcrGTZzQMChMiQuQIlDaKpGy3KZs5NIph",
     routerAddress: "EQB3ncyBUTjZKH0OcrGTZzQMChMiQuQIlDaKpGy3KZs5NIph",
-    token0: { symbol: "USDT", name: "Tether USD", decimals: 6, address: "EQAv5W1Bp1KqFkLOyMq1zLKh9sH6YB0YCW-sWN3vYH2JmcBR" },
-    token1: { symbol: "USDC", name: "USD Coin", decimals: 6, address: "EQBySHEaUMSXk_GQzGwGKtPiwXH-ELt9fSVhzSfyMp0lsmmA" },
+    token0: {
+      symbol: "USDT",
+      name: "Tether USD",
+      decimals: 6,
+      address: "EQAv5W1Bp1KqFkLOyMq1zLKh9sH6YB0YCW-sWN3vYH2JmcBR",
+    },
+    token1: {
+      symbol: "USDC",
+      name: "USD Coin",
+      decimals: 6,
+      address: "EQBySHEaUMSXk_GQzGwGKtPiwXH-ELt9fSVhzSfyMp0lsmmA",
+    },
     entryMode: "balanced",
     enabled: true,
     disabledReason: null,
@@ -178,7 +193,13 @@ const DEMO_IMPACT: Impact = {
   sourceWithdrawals: 3,
   completionPips: 9400,
   medianEntryUnits: "25000000",
-  pools: [{ poolId: "ston-fi-ton-usdt-usdc", depositUsdUnits: "1180000000", positions: 47 }],
+  pools: [
+    {
+      poolId: "ston-fi-ton-usdt-usdc",
+      depositUsdUnits: "1180000000",
+      positions: 47,
+    },
+  ],
 };
 
 export async function getPools(): Promise<Pool[]> {
@@ -290,7 +311,7 @@ export async function submitSourceOrder(
   signature: string,
   baseTxHash: string,
 ): Promise<{ flow: FlowView; tradeId: string }> {
-  const result = await request(
+  const result = (await request(
     `/v1/flows/${encodeURIComponent(flowId)}/source`,
     {
       method: "POST",
@@ -300,16 +321,14 @@ export async function submitSourceOrder(
       },
       body: JSON.stringify({ signature, baseTxHash }),
     },
-  ) as { flow: FlowView; tradeId: string };
+  )) as { flow: FlowView; tradeId: string };
   return result;
 }
 
-export async function getTradeStatus(
-  flowId: string,
-): Promise<Trade> {
-  const result = await request(
+export async function getTradeStatus(flowId: string): Promise<Trade> {
+  const result = (await request(
     `/v1/flows/${encodeURIComponent(flowId)}/trade`,
-  ) as { trade: Trade };
+  )) as { trade: Trade };
   return tradeSchema.parse(result.trade);
 }
 
@@ -319,7 +338,7 @@ export async function submitDeposit(
   attempt: number,
   version: number,
 ): Promise<{ flow: FlowView }> {
-  const result = await request(
+  const result = (await request(
     `/v1/flows/${encodeURIComponent(flowId)}/deposit`,
     {
       method: "POST",
@@ -329,7 +348,7 @@ export async function submitDeposit(
       },
       body: JSON.stringify({ hash, attempt, version }),
     },
-  ) as { flow: FlowView };
+  )) as { flow: FlowView };
   return result;
 }
 
@@ -351,7 +370,7 @@ export async function submitExit(
   attempt: number,
   version: number,
 ): Promise<{ flow: FlowView }> {
-  const result = await request(
+  const result = (await request(
     `/v1/flows/${encodeURIComponent(flowId)}/exit`,
     {
       method: "POST",
@@ -361,13 +380,111 @@ export async function submitExit(
       },
       body: JSON.stringify({ hash, attempt, version }),
     },
-  ) as { flow: FlowView };
+  )) as { flow: FlowView };
+  return result;
+}
+
+export async function submitWithdraw(
+  flowId: string,
+  hash: string,
+  attempt: number,
+  version: number,
+): Promise<{ flow: FlowView }> {
+  const result = (await request(
+    `/v1/flows/${encodeURIComponent(flowId)}/withdraw`,
+    {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": crypto.randomUUID(),
+        Authorization: `Bearer ${flowToken}`,
+      },
+      body: JSON.stringify({ hash, attempt, version }),
+    },
+  )) as { flow: FlowView };
   return result;
 }
 
 export async function buildWithdrawalPlan(flowId: string): Promise<FlowDetail> {
   return flowResponseSchema.parse(
     await request(`/v1/flows/${encodeURIComponent(flowId)}/exit-draft`, {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": crypto.randomUUID(),
+        Authorization: `Bearer ${flowToken}`,
+      },
+    }),
+  );
+}
+
+export interface WalletTransaction {
+  validUntil: number;
+  messages: Array<{
+    address: string;
+    amount: string;
+    payload?: string;
+    stateInit?: string;
+  }>;
+}
+
+export interface DepositPreview {
+  transaction: WalletTransaction;
+  plan: DepositPlan;
+  gasUnits: string;
+}
+
+export interface WithdrawPreview {
+  transaction: WalletTransaction;
+  lpUnits: string;
+  poolAddress: string;
+  gasUnits: string;
+}
+
+export async function getDepositTx(flowId: string): Promise<DepositPreview> {
+  const result = (await request(
+    `/v1/flows/${encodeURIComponent(flowId)}/tx/deposit`,
+    {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": crypto.randomUUID(),
+        Authorization: `Bearer ${flowToken}`,
+      },
+    },
+  )) as { preview: DepositPreview };
+  return result.preview;
+}
+
+export async function getWithdrawTx(
+  flowId: string,
+  lpUnits: string,
+): Promise<WithdrawPreview> {
+  const result = (await request(
+    `/v1/flows/${encodeURIComponent(flowId)}/tx/withdraw`,
+    {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": crypto.randomUUID(),
+        Authorization: `Bearer ${flowToken}`,
+      },
+      body: JSON.stringify({ lpUnits }),
+    },
+  )) as { preview: WithdrawPreview };
+  return result.preview;
+}
+
+const orderDataSchema = z.object({
+  flow: flowViewSchema,
+  typedData: z.record(z.string(), z.unknown()),
+  owner: z.string().min(1),
+  recipient: z.string().min(1),
+  inputUnits: z.string().min(1),
+  expiresAt: z.string().datetime(),
+});
+
+export type OrderData = z.infer<typeof orderDataSchema>;
+
+export async function getOrderData(flowId: string): Promise<OrderData> {
+  return orderDataSchema.parse(
+    await request(`/v1/flows/${encodeURIComponent(flowId)}/source-data`, {
       method: "POST",
       headers: {
         "Idempotency-Key": crypto.randomUUID(),

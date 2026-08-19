@@ -61,7 +61,14 @@ export interface TradeRecord {
   flowId: string;
   quoteId: string;
   orderHash: string;
-  status: "registered" | "matched" | "settling" | "filled" | "partial" | "failed" | "expired";
+  status:
+    | "registered"
+    | "matched"
+    | "settling"
+    | "filled"
+    | "partial"
+    | "failed"
+    | "expired";
   receivedUnits: string | null;
   reference: string | null;
   checkedAt: string;
@@ -125,7 +132,12 @@ export interface Store {
   ): Promise<Flow>;
   saveTrade(input: Omit<TradeRecord, "id">): Promise<TradeRecord>;
   getTrade(flowId: string): Promise<TradeRecord | null>;
-  updateTrade(id: string, update: Partial<Pick<TradeRecord, "status" | "receivedUnits" | "reference" | "checkedAt">>): Promise<TradeRecord>;
+  updateTrade(
+    id: string,
+    update: Partial<
+      Pick<TradeRecord, "status" | "receivedUnits" | "reference" | "checkedAt">
+    >,
+  ): Promise<TradeRecord>;
   saveChallenge(
     input: Omit<WalletChallenge, "id" | "usedAt">,
   ): Promise<WalletChallenge>;

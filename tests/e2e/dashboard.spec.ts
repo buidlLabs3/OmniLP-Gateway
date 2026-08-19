@@ -207,10 +207,14 @@ test("shows wallet proof cards in draft state", async ({ page }) => {
     ).__telegramTest.main(),
   );
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Wallet proof" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Wallet proof" }),
+  ).toBeVisible();
   await expect(page.getByText("Base wallet")).toBeVisible();
   await expect(page.getByText("TON wallet")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Prove" }).first()).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Prove" }).first(),
+  ).toBeVisible();
 });
 
 test("shows action card with next steps for draft flow", async ({ page }) => {
@@ -240,7 +244,9 @@ test("displays timeline stages for draft flow", async ({ page }) => {
   );
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await expect(page.getByText("Review created")).toBeVisible();
-  await expect(page.locator("ol.timeline").getByText("Wallet proof", { exact: true })).toBeVisible();
+  await expect(
+    page.locator("ol.timeline").getByText("Wallet proof", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Route quote")).toBeVisible();
   await expect(page.getByText("Cross-chain execution")).toBeVisible();
   await expect(page.getByText("LP position")).toBeVisible();
@@ -300,7 +306,11 @@ test("can resume a flow by entering a flow ID", async ({ page }) => {
   await expect(page.getByText("You send")).toBeVisible();
   await expect(page.getByText(/25.*USDC/)).toBeVisible();
   await expect(page.getByText(/24\.75.*USDT/)).toBeVisible();
-  await expect(page.getByText("review source order").or(page.getByText("Review source order"))).toBeVisible();
+  await expect(
+    page
+      .getByText("review source order")
+      .or(page.getByText("Review source order")),
+  ).toBeVisible();
 });
 
 test("shows deposit plan section for funded flow", async ({ page }) => {
@@ -367,7 +377,9 @@ test("shows deposit plan section for funded flow", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await page.getByLabel("Flow ID").fill(fundedFlowId);
   await page.getByTitle("Load flow").click();
-  await expect(page.getByRole("heading", { name: "Deposit plan" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Deposit plan" }),
+  ).toBeVisible();
   await expect(page.getByText(/submit deposit/i)).toBeVisible();
   await expect(page.getByText(/24\.75.*USDT/)).toBeVisible();
   await expect(page.getByText(/single/)).toBeVisible();
@@ -401,7 +413,8 @@ test("shows exit timeline for completed entry flow", async ({ page }) => {
             protocolFeeUnits: "240000",
             integratorFeeUnits: "0",
             sourceProtocolAddress: rawTon(4),
-            destinationProtocolAddress: "0x1111111111111111111111111111111111111111",
+            destinationProtocolAddress:
+              "0x1111111111111111111111111111111111111111",
             quotedAt: now,
             expiresAt: new Date(Date.now() + 60_000).toISOString(),
           },
@@ -423,8 +436,12 @@ test("shows exit timeline for completed entry flow", async ({ page }) => {
   await page.getByLabel("Flow ID").fill(exitFlowId);
   await page.getByTitle("Load flow").click();
   await expect(page.getByText(/exit quoted/)).toBeVisible();
-  await expect(page.locator("ol.timeline").getByText("Build withdrawal")).toBeVisible();
-  await expect(page.locator("ol.timeline").getByText("Submit withdrawal")).toBeVisible();
+  await expect(
+    page.locator("ol.timeline").getByText("Build withdrawal"),
+  ).toBeVisible();
+  await expect(
+    page.locator("ol.timeline").getByText("Submit withdrawal"),
+  ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Exit quote" })).toBeVisible();
   await expect(page.getByText(/24.*USDT/)).toBeVisible();
   await expect(page.getByText(/23\.5.*USDC/)).toBeVisible();
@@ -500,7 +517,11 @@ test("shows trade status card for active trade", async ({ page }) => {
   await page.getByTitle("Load flow").click();
   await expect(page.getByText("Trade status")).toBeVisible();
   await expect(page.getByText("registered")).toBeVisible();
-  await expect(page.getByText("Refresh trade state").or(page.getByText("refresh trade state"))).toBeVisible();
+  await expect(
+    page
+      .getByText("Refresh trade state")
+      .or(page.getByText("refresh trade state")),
+  ).toBeVisible();
 });
 
 test("shows completed position card for finished entry", async ({ page }) => {
@@ -539,7 +560,9 @@ test("shows completed position card for finished entry", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await page.getByLabel("Flow ID").fill(completeFlowId);
   await page.getByTitle("Load flow").click();
-  await expect(page.getByRole("heading", { name: "LP position open" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "LP position open" }),
+  ).toBeVisible();
   await expect(page.getByText(/position is live/)).toBeVisible();
 });
 
@@ -579,6 +602,8 @@ test("shows exit complete card for finished exit", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
   await page.getByLabel("Flow ID").fill(exitCompleteId);
   await page.getByTitle("Load flow").click();
-  await expect(page.getByRole("heading", { name: "Funds returned" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Funds returned" }),
+  ).toBeVisible();
   await expect(page.getByText(/USDC has been returned/)).toBeVisible();
 });

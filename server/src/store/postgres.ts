@@ -961,7 +961,11 @@ export class PostgresStore implements Store {
         row.quote_id !== input.quoteId ||
         row.order_hash !== input.orderHash
       ) {
-        throw new AppError("CONFLICT", "Trade already exists with different data", 409);
+        throw new AppError(
+          "CONFLICT",
+          "Trade already exists with different data",
+          409,
+        );
       }
     }
     return {
@@ -1007,7 +1011,9 @@ export class PostgresStore implements Store {
 
   async updateTrade(
     id: string,
-    update: Partial<Pick<TradeRecord, "status" | "receivedUnits" | "reference" | "checkedAt">>,
+    update: Partial<
+      Pick<TradeRecord, "status" | "receivedUnits" | "reference" | "checkedAt">
+    >,
   ): Promise<TradeRecord> {
     const fields: string[] = [];
     const values: unknown[] = [id];
@@ -1030,23 +1036,37 @@ export class PostgresStore implements Store {
     }
     if (fields.length === 0) {
       const result = await this.pool.query<{
-        id: string; flow_id: string; quote_id: string; order_hash: string;
-        status: TradeRecord["status"]; received_units: string | null;
-        reference: string | null; checked_at: Date;
+        id: string;
+        flow_id: string;
+        quote_id: string;
+        order_hash: string;
+        status: TradeRecord["status"];
+        received_units: string | null;
+        reference: string | null;
+        checked_at: Date;
       }>("SELECT * FROM trade WHERE id = $1", [id]);
       const row = result.rows[0];
       if (!row) throw new AppError("NOT_FOUND", "Trade not found", 404);
       return {
-        id: row.id, flowId: row.flow_id, quoteId: row.quote_id,
-        orderHash: row.order_hash, status: row.status,
-        receivedUnits: row.received_units, reference: row.reference,
+        id: row.id,
+        flowId: row.flow_id,
+        quoteId: row.quote_id,
+        orderHash: row.order_hash,
+        status: row.status,
+        receivedUnits: row.received_units,
+        reference: row.reference,
         checkedAt: row.checked_at.toISOString(),
       };
     }
     const result = await this.pool.query<{
-      id: string; flow_id: string; quote_id: string; order_hash: string;
-      status: TradeRecord["status"]; received_units: string | null;
-      reference: string | null; checked_at: Date;
+      id: string;
+      flow_id: string;
+      quote_id: string;
+      order_hash: string;
+      status: TradeRecord["status"];
+      received_units: string | null;
+      reference: string | null;
+      checked_at: Date;
     }>(
       `UPDATE trade SET ${fields.join(", ")} WHERE id = $1 RETURNING *`,
       values,
@@ -1054,9 +1074,13 @@ export class PostgresStore implements Store {
     const row = result.rows[0];
     if (!row) throw new AppError("NOT_FOUND", "Trade not found", 404);
     return {
-      id: row.id, flowId: row.flow_id, quoteId: row.quote_id,
-      orderHash: row.order_hash, status: row.status,
-      receivedUnits: row.received_units, reference: row.reference,
+      id: row.id,
+      flowId: row.flow_id,
+      quoteId: row.quote_id,
+      orderHash: row.order_hash,
+      status: row.status,
+      receivedUnits: row.received_units,
+      reference: row.reference,
       checkedAt: row.checked_at.toISOString(),
     };
   }

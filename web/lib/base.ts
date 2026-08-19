@@ -59,6 +59,56 @@ export async function signBaseMessage(message: string): Promise<string> {
   return value;
 }
 
+export async function signBaseTypedData(typedData: string): Promise<string> {
+  if (!baseProvider || !baseAddress) {
+    throw new Error("Base wallet is not connected");
+  }
+  const value = await baseProvider.request({
+    method: "eth_signTypedData_v4",
+    params: [baseAddress, typedData],
+  });
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(value)) {
+    throw new Error("Wallet returned an invalid signature");
+  }
+  return value;
+}
+
+export async function sendBaseTransaction(params: {
+  to: string;
+  value?: string;
+  data?: string;
+}): Promise<string> {
+  if (!baseProvider || !baseAddress) {
+    throw new Error("Base wallet is not connected");
+  }
+  const value = await baseProvider.request({
+    method: "eth_sendTransaction",
+    params: [{ from: baseAddress, ...params }],
+  });
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new Error("Wallet returned an invalid transaction hash");
+  }
+  return value;
+}
+
+export async function getBaseBalance(): Promise<string> {
+  if (!baseProvider || !baseAddress) {
+    throw new Error("Base wallet is not connected");
+  }
+  const value = await baseProvider.request({
+    method: "eth_getBalance",
+    params: [baseAddress, "latest"],
+  });
+  if (typeof value !== "string") {
+    throw new Error("Wallet returned an invalid balance");
+  }
+  return value;
+}
+
+export async function getBaseAddress(): Promise<string> {
+  return baseAddress;
+}
+
 declare global {
   interface Window {
     ethereum?: InjectedProvider;

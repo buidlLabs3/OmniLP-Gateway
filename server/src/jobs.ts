@@ -27,9 +27,10 @@ export function getFailedState(
   return "exit_failed" as const;
 }
 
-function mapTradeStatus(
-  upstream: string,
-): { state: string; receivedUnits: string | null } {
+function mapTradeStatus(upstream: string): {
+  state: string;
+  receivedUnits: string | null;
+} {
   const s = upstream.toUpperCase();
   if (s.includes("FULLY_FILLED") || s.includes("SETTLED") || s === "FILLED")
     return { state: "filled", receivedUnits: null };
@@ -81,8 +82,7 @@ export class Jobs {
           );
         }
       } catch (error) {
-        const max =
-          job.type === "track_trade" ? maxTradeAttempts : maxAttempts;
+        const max = job.type === "track_trade" ? maxTradeAttempts : maxAttempts;
         if (!isRetryable(error) || job.attempts >= max) {
           if (job.type === "verify_transaction") await this.reject(job.payload);
           else await this.store.finishJob(job.id);
@@ -258,12 +258,7 @@ export class Jobs {
       this.store.getTrade(flowId),
     ]);
     if (!flow || !trade) return;
-    const terminal = new Set([
-      "filled",
-      "partial",
-      "failed",
-      "expired",
-    ]);
+    const terminal = new Set(["filled", "partial", "failed", "expired"]);
     if (terminal.has(trade.status)) return;
     const { status, receivedUnits } = await this.omni.trackTrade(
       trade.orderHash,
