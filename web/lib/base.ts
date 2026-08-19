@@ -109,6 +109,26 @@ export async function getBaseAddress(): Promise<string> {
   return baseAddress;
 }
 
+const WITHDRAW_SELECTOR = "0x3ccfd60b";
+
+export async function buildSourceWithdrawTx(params: {
+  sourceProtocolAddress: string;
+  inputUnits: string;
+}): Promise<{ to: string; data: string; value: string }> {
+  if (!baseProvider || !baseAddress) {
+    throw new Error("Base wallet is not connected");
+  }
+  const encodedAmount = BigInt(params.inputUnits)
+    .toString(16)
+    .padStart(64, "0");
+  const data = `${WITHDRAW_SELECTOR}${encodedAmount}`;
+  return {
+    to: params.sourceProtocolAddress,
+    data,
+    value: "0x0",
+  };
+}
+
 declare global {
   interface Window {
     ethereum?: InjectedProvider;

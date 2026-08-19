@@ -636,43 +636,123 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
     const { id } = idSchema.parse(request.params);
     auth.verifySession(id, request.headers.authorization);
-    const input = transactionReferenceSchema.parse(request.body);
-    const chain = "base" as const;
-    const hash = tonHashSchema.parse(input.hash);
+    const body = z
+      .object({
+        signature: z.string().min(1),
+        tonTxHash: tonHashSchema,
+        attempt: z.number().int().min(1),
+        version: z.number().int().min(0),
+      })
+      .parse(request.body);
     const result = await idempotent(
       store,
       `exit:${id}`,
       request.headers["idempotency-key"] as string | undefined,
-      { ...input, hash },
+      body,
       async () => {
         const flow = await store.getFlow(id);
         if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
-        if (flow.state !== "exit_pending") {
-          throw new AppError("CONFLICT", "Exit is not ready", 409);
+        if (flow.state !== "exit_quoted") {
+          throw new AppError(
+            "CONFLICT",
+            "Exit quote is required before execution",
+            409,
+          );
         }
         const quote = await store.getQuote(id);
         if (!quote || isExpired(quote.expiresAt)) {
           throw new AppError("QUOTE_EXPIRED", "Exit quote has expired", 409);
         }
-        return store.submitTransaction(
+        const { tradeId } = await omni.registerOrder(
+          flow,
+          quote,
+          body.signature,
+        );
+        await store.saveTrade({
+          flowId: id,
+          quoteId: quote.id,
+          orderHash: tradeId,
+          status: "registered",
+          receivedUnits: null,
+          reference: null,
+          checkedAt: new Date().toISOString(),
+        });
+        const updated = await store.setState(
+          id,
+          "exit_pending",
+          `exit-order:${tradeId}`,
+          flow.version,
+        );
+        await store.saveTransaction({
+          flowId: id,
+          kind: "exit",
+          chain: "ton",
+          hash: body.tonTxHash,
+          status: "pending",
+          attempt: body.attempt,
+          confirmedAt: null,
+        });
+        await store.addJob(
+          `verify-exit-ton:${id}`,
+          "verify_transaction",
           {
             flowId: id,
-            kind: "exit",
-            chain,
-            hash,
-            status: "pending",
-            attempt: input.attempt,
-            confirmedAt: null,
+            transactionId:
+              (await store.listTransactions(id)).find(
+                (t) => t.hash === body.tonTxHash,
+              )?.id ?? "",
           },
-          "exit_complete",
-          input.version,
+          new Date().toISOString(),
         );
+        await store.addJob(
+          `track-exit-trade:${id}`,
+          "track_trade",
+          { flowId: id, tradeId },
+          new Date().toISOString(),
+        );
+        return {
+          flow: updated,
+          tradeId,
+        };
       },
     );
     return {
       flow: safeFlow(result.value.flow),
-      transaction: result.value.transaction,
-      message: "Exit transaction submitted for verification",
+      tradeId: result.value.tradeId,
+      message:
+        "Exit order registered and TON transaction submitted for verification",
+    };
+  });
+
+  app.post("/v1/flows/:id/source-withdraw-data", async (request) => {
+    const { id } = idSchema.parse(request.params);
+    auth.verifySession(id, request.headers.authorization);
+    const flow = await store.getFlow(id);
+    if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
+    if (flow.state !== "source_withdrawal_available") {
+      throw new AppError("CONFLICT", "Source withdrawal is not available", 409);
+    }
+    const quote = await store.getQuote(id);
+    if (!quote) throw new AppError("NOT_FOUND", "Quote not found", 404);
+    return {
+      flow: safeFlow(flow),
+      sourceProtocolAddress: quote.sourceProtocolAddress,
+      baseWallet: flow.baseWallet,
+      inputUnits: quote.inputUnits,
+    };
+  });
+
+  app.post("/v1/flows/:id/ton-receipt", async (request) => {
+    const { id } = idSchema.parse(request.params);
+    const flow = await store.getFlow(id);
+    if (!flow) throw new AppError("NOT_FOUND", "Flow not found", 404);
+    const trade = await store.getTrade(id);
+    const baseline = trade?.receivedUnits ?? flow.sourceUnits;
+    return {
+      flowId: id,
+      wallet: flow.tonWallet,
+      baseline,
+      expectedMin: trade?.receivedUnits ?? "0",
     };
   });
 

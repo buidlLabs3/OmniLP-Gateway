@@ -146,19 +146,24 @@ export class Jobs {
     if (transaction.status !== "pending") return;
 
     let result: "pending" | "failed" | "confirmed";
-    if (transaction.kind === "source" || transaction.kind === "exit") {
+    if (transaction.kind === "source") {
       const quote = await this.store.getQuote(flow.id);
       if (!quote)
         throw new AppError("PROOF_REQUIRED", "Accepted quote is missing", 409);
-      result =
-        transaction.kind === "source"
-          ? await this.base.verifySource(transaction.hash, flow, quote)
-          : await this.base.verifyExit(
-              transaction.hash,
-              flow,
-              quote,
-              this.config.BASE_USDC,
-            );
+      result = await this.base.verifySource(transaction.hash, flow, quote);
+    } else if (transaction.kind === "exit") {
+      const tonResult = await this.ston.verifyLiquidityAction(
+        transaction.hash,
+        flow.tonWallet,
+        "deposit",
+      );
+      if (tonResult === "failed") {
+        result = "failed";
+      } else if (tonResult === "pending") {
+        result = "pending";
+      } else {
+        result = "confirmed";
+      }
     } else {
       result = await this.ston.verifyLiquidityAction(
         transaction.hash,
@@ -193,6 +198,44 @@ export class Jobs {
         "trade_pending",
         flow.version,
         `transaction:${transaction.id}:confirmed`,
+      );
+      return;
+    }
+    if (transaction.kind === "exit") {
+      const trade = await this.store.getTrade(flow.id);
+      if (!trade || trade.status === "expired" || trade.status === "failed") {
+        throw new AppError(
+          "PROOF_REQUIRED",
+          "Exit trade has not settled",
+          409,
+          true,
+        );
+      }
+      if (trade.status !== "filled") {
+        const { status } = await this.omni.trackTrade(trade.orderHash);
+        const mapped = mapTradeStatus(status);
+        await this.store.updateTrade(trade.id, {
+          status: mapped.state as TradeRecord["status"],
+          checkedAt: new Date().toISOString(),
+        });
+        if (mapped.state !== "filled") {
+          throw new AppError(
+            "PROOF_REQUIRED",
+            "Exit trade has not settled",
+            409,
+            true,
+          );
+        }
+      }
+      const quote = await this.store.getQuote(flow.id);
+      if (!quote)
+        throw new AppError("PROOF_REQUIRED", "Exit quote is missing", 409);
+      await this.store.finishTransaction(
+        transaction.id,
+        "confirmed",
+        "exit_complete",
+        flow.version,
+        `exit:${transaction.id}:confirmed`,
       );
       return;
     }
@@ -285,12 +328,14 @@ export class Jobs {
         `trade:${trade.orderHash}:filled`,
         current.version,
       );
-      await this.store.setState(
-        flowId,
-        "funds_received",
-        `trade:${trade.orderHash}:received`,
-        updated.version,
-      );
+      if (current.type !== "exit") {
+        await this.store.setState(
+          flowId,
+          "funds_received",
+          `trade:${trade.orderHash}:received`,
+          updated.version,
+        );
+      }
     } else if (mapped.state === "partial") {
       const current = await this.store.getFlow(flowId);
       if (!current) return;

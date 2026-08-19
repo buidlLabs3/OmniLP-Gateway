@@ -366,10 +366,11 @@ export async function requestExitQuote(flowId: string): Promise<FlowDetail> {
 
 export async function submitExit(
   flowId: string,
-  hash: string,
+  signature: string,
+  tonTxHash: string,
   attempt: number,
   version: number,
-): Promise<{ flow: FlowView }> {
+): Promise<{ flow: FlowView; tradeId: string }> {
   const result = (await request(
     `/v1/flows/${encodeURIComponent(flowId)}/exit`,
     {
@@ -378,9 +379,9 @@ export async function submitExit(
         "Idempotency-Key": crypto.randomUUID(),
         Authorization: `Bearer ${flowToken}`,
       },
-      body: JSON.stringify({ hash, attempt, version }),
+      body: JSON.stringify({ signature, tonTxHash, attempt, version }),
     },
-  )) as { flow: FlowView };
+  )) as { flow: FlowView; tradeId: string };
   return result;
 }
 
@@ -492,4 +493,50 @@ export async function getOrderData(flowId: string): Promise<OrderData> {
       },
     }),
   );
+}
+
+const sourceWithdrawDataSchema = z.object({
+  flow: flowViewSchema,
+  sourceProtocolAddress: z.string().min(1),
+  baseWallet: z.string().min(1),
+  inputUnits: z.string().min(1),
+});
+
+export type SourceWithdrawData = z.infer<typeof sourceWithdrawDataSchema>;
+
+export async function getSourceWithdrawData(
+  flowId: string,
+): Promise<SourceWithdrawData> {
+  return sourceWithdrawDataSchema.parse(
+    await request(
+      `/v1/flows/${encodeURIComponent(flowId)}/source-withdraw-data`,
+      {
+        method: "POST",
+        headers: {
+          "Idempotency-Key": crypto.randomUUID(),
+          Authorization: `Bearer ${flowToken}`,
+        },
+      },
+    ),
+  );
+}
+
+export async function submitSourceWithdraw(
+  flowId: string,
+  hash: string,
+  attempt: number,
+  version: number,
+): Promise<{ flow: FlowView }> {
+  const result = (await request(
+    `/v1/flows/${encodeURIComponent(flowId)}/withdraw-source`,
+    {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": crypto.randomUUID(),
+        Authorization: `Bearer ${flowToken}`,
+      },
+      body: JSON.stringify({ hash, attempt, version }),
+    },
+  )) as { flow: FlowView };
+  return result;
 }

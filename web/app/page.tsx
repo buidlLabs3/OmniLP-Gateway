@@ -42,6 +42,7 @@ import {
   getImpact,
   getOrderData,
   getPools,
+  getSourceWithdrawData,
   getTradeStatus,
   getWithdrawTx,
   proveBase as submitBaseProof,
@@ -52,6 +53,7 @@ import {
   submitDeposit,
   submitExit,
   submitSourceOrder,
+  submitSourceWithdraw,
   submitWithdraw,
   type FlowDetail,
   type Impact,
@@ -60,6 +62,7 @@ import {
   type Trade,
 } from "../lib/api";
 import {
+  buildSourceWithdrawTx,
   connectBaseWallet,
   getBaseAddress,
   sendBaseTransaction,
@@ -204,6 +207,8 @@ const executableActions = new Set([
   "submit_withdrawal",
   "request_exit_quote",
   "review_exit",
+  "withdraw_source",
+  "refresh_trade",
 ]);
 
 export default function Home() {
@@ -487,14 +492,17 @@ export default function Home() {
           primaryType: string;
         };
         const signature = await signBaseTypedData(JSON.stringify(typedData));
-        const txResult = await sendBaseTransaction({
-          to: String(typedData.domain.verifyingContract),
-          value: "0x0",
-          data: String(typedData.message.input_asset),
-        });
+        const preview = await getWithdrawTx(
+          flow.flow.id,
+          flow.flow.sourceUnits,
+        );
+        const { hash: tonTxHash } = await sendTonTransaction(
+          preview.transaction,
+        );
         const result = await submitExit(
           flow.flow.id,
-          txResult,
+          signature,
+          tonTxHash,
           1,
           flow.flow.version,
         );
@@ -504,6 +512,22 @@ export default function Home() {
       } else if (action === "refresh_trade") {
         const t = await getTradeStatus(flow.flow.id);
         setTrade(t);
+      } else if (action === "withdraw_source") {
+        const withdrawData = await getSourceWithdrawData(flow.flow.id);
+        const txParams = await buildSourceWithdrawTx({
+          sourceProtocolAddress: withdrawData.sourceProtocolAddress,
+          inputUnits: withdrawData.inputUnits,
+        });
+        const txHash = await sendBaseTransaction(txParams);
+        const result = await submitSourceWithdraw(
+          flow.flow.id,
+          txHash,
+          1,
+          flow.flow.version,
+        );
+        setFlow((current) =>
+          current ? { ...current, flow: result.flow } : current,
+        );
       }
       tap("success");
     } catch (cause) {
