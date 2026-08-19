@@ -1,3 +1,7 @@
+import { readFile } from "node:fs/promises";
+
+import pg from "pg";
+
 import { buildApp } from "./app.js";
 import { getConfig, loadLocalEnv } from "./config.js";
 import { demoPools } from "./demo.js";
@@ -9,6 +13,24 @@ import type { Store } from "./store/types.js";
 
 loadLocalEnv();
 const config = getConfig();
+
+if (!config.DEMO_MODE) {
+  const client = new pg.Client({ connectionString: config.DATABASE_URL });
+  try {
+    await client.connect();
+    const sql = await readFile(
+      new URL("../../db/migrations/001_initial.sql", import.meta.url),
+      "utf8",
+    );
+    await client.query(sql);
+    console.log("Database migration complete");
+  } catch (error) {
+    console.error("Migration failed (non-fatal):", error);
+  } finally {
+    await client.end();
+  }
+}
+
 const store: Store = config.DEMO_MODE
   ? new MemoryStore()
   : new PostgresStore(config.DATABASE_URL);

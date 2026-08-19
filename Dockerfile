@@ -16,6 +16,7 @@ COPY --from=deps /app/server/node_modules ./server/node_modules
 COPY tsconfig.json ./
 COPY shared/ ./shared/
 COPY server/ ./server/
+COPY db/ ./db/
 RUN pnpm --filter @omnilp/shared build
 RUN pnpm --filter @omnilp/server build
 
@@ -30,7 +31,7 @@ COPY --from=builder --chown=appuser:nodejs /app/server/package.json ./server/
 COPY --from=deps --chown=appuser:nodejs /app/node_modules ./node_modules
 COPY --from=deps --chown=appuser:nodejs /app/shared/node_modules ./shared/node_modules
 COPY --from=deps --chown=appuser:nodejs /app/server/node_modules ./server/node_modules
-COPY --chown=appuser:nodejs db/ ./db/
+COPY --from=builder --chown=appuser:nodejs /app/db ./db
 USER appuser
 EXPOSE 3001
-CMD ["sh", "-c", "echo 'Running migration...' && node server/dist/migrate.js 2>&1; echo 'Starting server...' && exec node server/dist/index.js 2>&1"]
+CMD ["node", "server/dist/index.js"]
