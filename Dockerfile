@@ -13,6 +13,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/shared/node_modules ./shared/node_modules
 COPY --from=deps /app/server/node_modules ./server/node_modules
+COPY tsconfig.json ./
 COPY shared/ ./shared/
 COPY server/ ./server/
 RUN pnpm --filter @omnilp/shared build
