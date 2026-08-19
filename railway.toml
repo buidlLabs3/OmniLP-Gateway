@@ -1,0 +1,9 @@
+[build]
+builder = "nixpacks"
+buildCommand = "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @omnilp/shared build"
+
+[deploy]
+startCommand = "pnpm --filter @omnilp/server start"
+healthcheckPath = "/health"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5
